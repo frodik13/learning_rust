@@ -5,15 +5,15 @@
 ## ~~Фаза 1: Основы~~ (пропущена — уже знаешь)
 
 ## Фаза 2: Ownership — понять, а не угадать
-- [ ] **2.1** Ownership, move, Copy/Clone — что реально происходит в памяти
-- [ ] **2.2** Borrowing: почему `&mut` эксклюзивный, data races на этапе компиляции
-- [ ] **2.3** Lifetimes: когда компилятор не может вывести сам, elision rules
-- [ ] **2.4** Самостоятельная борьба с borrow checker (задачи без подсказок)
+- [x] **2.1** Ownership, move, Copy/Clone — что реально происходит в памяти
+- [x] **2.2** Borrowing: почему `&mut` эксклюзивный, data races на этапе компиляции
+- [x] **2.3** Lifetimes: когда компилятор не может вывести сам, elision rules
+- [x] **2.4** Самостоятельная борьба с borrow checker (задачи без подсказок)
 
 ## Фаза 3: Система типов — мощь Rust
-- [ ] **3.1** Traits: impl vs dyn, object safety, orphan rule
-- [ ] **3.2** Generics + trait bounds + associated types (когда что использовать)
-- [ ] **3.3** Closures: Fn/FnMut/FnOnce, захват переменных, move closures
+- [x] **3.1** Traits: impl vs dyn, object safety, orphan rule
+- [x] **3.2** Generics + trait bounds + associated types (когда что использовать)
+- [x] **3.3** Closures: Fn/FnMut/FnOnce, захват переменных, move closures
 - [ ] **3.4** Итераторы: ленивость, свой итератор, zero-cost абстракция
 - [ ] **3.5** Error handling: thiserror, From конверсии, error propagation паттерны
 - [ ] **3.6** Enums как state machines, newtype pattern, type-level programming

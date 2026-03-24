@@ -235,3 +235,45 @@ where
 // dyn Register<Value = u8>  — OK: Value зафиксирован, vtable можно построить
 let regs: Vec<&dyn Register<Value = u8>> = vec![&r1, &r2];
 ```
+
+### 3.3 Closures: Fn, FnMut, FnOnce
+
+**Три трейта замыканий (от слабого к сильному):**
+- `Fn` — захватывает по `&T` (только читает). Можно вызывать сколько угодно раз.
+- `FnMut` — захватывает по `&mut T` (может менять). Можно вызывать много раз.
+- `FnOnce` — захватывает по `T` (забирает владение). Можно вызвать один раз.
+
+Иерархия: `Fn` ⊂ `FnMut` ⊂ `FnOnce`. Кто реализует `Fn` — автоматически реализует остальные.
+
+Компилятор **сам выбирает** минимально необходимый трейт.
+
+**`move` closure — принудительное перемещение:**
+```rust
+fn make_greeter(name: String) -> impl Fn() -> String {
+    let greeting = format!("Hello, {}!", name);
+    move || greeting.clone()  // move забирает greeting внутрь замыкания
+}
+```
+Без `move` замыкание захватывает `greeting` по ссылке, но `greeting` — локальная переменная,
+которая умрёт при выходе из функции → dangling reference. `move` переносит владение внутрь замыкания.
+
+Критично для: возврата замыканий из функций, передачи в потоки, embedded callbacks.
+
+**Closure как параметр:**
+```rust
+fn count_matches<T, F>(items: &[T], predicate: F) -> i32
+where F: Fn(&T) -> bool  // предикат только читает элемент
+```
+
+**Возврат разных замыканий — `Box<dyn Fn>`:**
+```rust
+fn make_transformer(upper: bool) -> Box<dyn Fn(String) -> String> {
+    if upper {
+        Box::new(|s| s.to_uppercase())
+    } else {
+        Box::new(|s| s.to_lowercase())
+    }
+}
+```
+`impl Fn` = один конкретный анонимный тип. Две ветки if/else — два РАЗНЫХ типа.
+`Box<dyn Fn>` стирает конкретный тип через vtable.

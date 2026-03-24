@@ -1,178 +1,140 @@
-// === ЗАДАНИЕ 3.2: Generics, Trait Bounds, Associated Types ===
+// === ЗАДАНИЕ 3.3: Closures ===
 
-use std::fmt::{Display};
+// --- Задача 1: Определи трейт ---
+// Для каждого замыкания определи: Fn, FnMut или FnOnce?
+// Раскомментируй правильный вариант.
 
-// --- Задача 1: Generic функция с trait bound ---
-// Напиши функцию `largest`, которая принимает слайс &[T] и возвращает ссылку
-// на максимальный элемент.
-// Подумай: какой trait bound нужен, чтобы сравнивать элементы через > ?
-// Сигнатура: fn largest<T: ???>(list: &[T]) -> &T
+fn task1() {
+    let name = String::from("Rust");
+    let numbers = vec![1, 2, 3];
+    let mut sum = 0;
 
-fn largest<T: PartialOrd>(list: &[T]) -> &T {
-    let mut max = &list[0];
-    for element in list {
-        if element > max {
-            max = element;
+    // Замыкание A: читает name
+    let a = || println!("{}", name);
+    // a реализует: Fn
+
+    // Замыкание B: меняет sum
+    let mut b = || {
+        sum += 1;
+    };
+    // b реализует FnMut
+
+    // Замыкание C: забирает numbers
+    let c = || {
+        drop(numbers);
+    };
+    // c реализует FnOnce
+
+    a();
+    a();
+    b();
+    b();
+    c();
+    // c(); // потому что переменная, которую захватило замыкание уже уничтожена.
+
+    println!("sum = {}", sum);
+}
+
+// --- Задача 2: Closure как параметр ---
+// Допиши функцию `apply_twice`: принимает значение и замыкание,
+// применяет замыкание два раза.
+// Какой trait bound нужен: Fn, FnMut, или FnOnce? Почему?
+fn apply_twice<T, F>(mut value: T, f: F) -> T
+where
+    F: Fn(T) -> T, // исправь trait если нужно
+{
+    value = f(value);
+    value = f(value);
+    value
+}
+
+fn task2() {
+    let result = apply_twice(1, |x| x * 2);
+    println!("apply_twice(1, *2) = {}", result); // 4
+
+    let result = apply_twice(String::from("ha"), |s| s + "ha");
+    println!("apply_twice(ha, +ha) = {}", result); // hahaha
+}
+
+// --- Задача 3: move closure ---
+// Эта функция должна вернуть замыкание, которое при вызове возвращает greeting.
+// Без move не скомпилируется — почему? Не знаю почему, объясни.
+// Исправь, добавив move.
+fn make_greeter(name: String) -> impl Fn() -> String {
+    let greeting = format!("Hello, {}!", name);
+    move || greeting.clone()
+}
+
+fn task3() {
+    let greet = make_greeter(String::from("Fedor"));
+    println!("{}", greet());
+    println!("{}", greet()); // должно работать дважды
+}
+
+// --- Задача 4: FnMut в реальности ---
+// Напиши функцию `count_matches`: принимает слайс &[T] и предикат (замыкание),
+// возвращает количество элементов, для которых предикат вернул true.
+// Какой bound на замыкание? Подумай: предикат только читает элемент.
+
+fn count_matches<T, F>(numbers: &[T], f: F) -> i32
+where
+    F: Fn(&T) -> bool,
+{
+    let mut count = 0;
+
+    for num in numbers {
+        if f(num) {
+            count += 1;
         }
     }
 
-    max
+    count
 }
 
-// --- Задача 2: Несколько trait bounds ---
-// Напиши функцию `print_largest`, которая находит максимальный элемент
-// и печатает его. Нужны ДВА bound: для сравнения и для вывода.
-// Два варианта синтаксиса — используй where:
-//   fn print_largest<T: Bound1 + Bound2>(list: &[T])
-//   fn print_largest<T>(list: &[T]) where T: Bound1 + Bound2
+fn task4() {
+    let numbers = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
-// твой код тут...
-fn print_largest<T>(list: &[T]) where T: PartialOrd + Display {
-    let max = largest(list);
-    println!("Max value: {}", max);
+    let evens = count_matches(&numbers, |x| x % 2 == 0);
+    println!("evens: {}", evens); // 5
+
+    let big = count_matches(&numbers, |x| *x > 5);
+    println!("big: {}", big); // 5
+
+    // С замыканием, которое захватывает переменную
+    let threshold = 7;
+    let above = count_matches(&numbers, |x| *x > threshold);
+    println!("above {}: {}", threshold, above); // 3
 }
 
-// --- Задача 3: Generic структура ---
-// Создай структуру Pair<T> с двумя полями: first: T, second: T
-// Реализуй метод `larger(&self) -> &T` — возвращает ссылку на большее.
-// Trait bound нужен только на impl, не на struct (struct хранит любой T).
-
-// твой код тут...
-struct Pair<T> {
-    first: T,
-    second: T,
-}
-
-impl<T: PartialOrd> Pair<T> {
-    fn larger(&self) -> &T {
-        if self.first > self.second {
-            &self.first
-        } else {
-            &self.second
-        }
+// --- Задача 5: Возврат разных замыканий ---
+// Эта функция возвращает замыкание-трансформер.
+// Если uppercase == true, возвращает замыкание, переводящее строку в верхний регистр.
+// Иначе — в нижний.
+// Почему тут нужен Box<dyn Fn>? Почему нельзя impl Fn? Потому что у замыкания может быть разный размер, поэтому нужен Box
+fn make_transformer(uppercase: bool) -> Box<dyn Fn(String) -> String> {
+    if uppercase {
+        Box::new(|x: String| x.to_uppercase())
+    } else {
+        Box::new(|x: String| x.to_lowercase())
     }
 }
 
-// --- Задача 4: Associated type ---
-// Создай trait `Register` для работы с регистрами (embedded контекст).
-// У регистра есть associated type `Value` — тип значения (u8, u16, u32...).
-//
-// trait Register {
-//     type Value;
-//     fn read(&self) -> Self::Value;
-//     fn write(&mut self, val: Self::Value);
-//     fn address(&self) -> u32;
-// }
-//
-// Создай две структуры:
-//   - Reg8  { addr: u32, value: u8 }   → Register с Value = u8
-//   - Reg16 { addr: u32, value: u16 }  → Register с Value = u16
-//
-// Напиши функцию, которая принимает любой Register, читает значение
-// и печатает адрес. Подумай: impl Trait или generic? Какой bound на Value
-// нужен для println?
-
-// твой код тут...
-trait Register {
-    type Value;
-    fn read(&self) -> Self::Value;
-    fn write(&mut self, val: Self::Value);
-    fn address(&self) -> u32;
-}
-
-struct Reg8 {
-    addr: u32,
-    value: u8,
-}
-
-struct Reg16 {
-    addr: u32,
-    value: u16,
-}
-
-impl Register for Reg8 {
-    type Value = u8;
-
-    fn read(&self) -> Self::Value {
-        self.value
-    }
-
-    fn write(&mut self, val: Self::Value) {
-        self.value = val;
-    }
-
-    fn address(&self) -> u32 {
-        self.addr
-    }
-}
-
-impl Register for Reg16 {
-    type Value = u16;
-
-    fn read(&self) -> Self::Value {
-        self.value
-    }
-
-    fn write(&mut self, val: Self::Value) {
-        self.value = val;
-    }
-
-    fn address(&self) -> u32 {
-        self.addr
-    }
-}
-
-fn print_register<R: Register>(reg: &R) where R::Value: Display {
-    let value = reg.read();
-    let addr = reg.address();
-    println!("Address: 0x{:08X}, Value = {}", addr, value);
-}
-
-// --- Задача 5: where clause и сложные bounds ---
-// Напиши функцию `dump_registers`, которая принимает слайс из &dyn Register<Value = u8>
-// и печатает адрес + значение каждого.
-// Почему тут нужен конкретный Value = u8, а не generic?
-
-// твой код тут...
-fn dump_registers(values: &[&dyn Register<Value = u8>]) {
-    for v in values {
-        let value = v.read();
-        let addr = v.address();
-        println!("Address: 0x{:08X}, value = {}", addr, value);
-    }
+fn task5() {
+    let upper = make_transformer(true);
+    let lower = make_transformer(false);
+    println!("{}", upper(String::from("hello"))); // HELLO
+    println!("{}", lower(String::from("WORLD"))); // world
 }
 
 fn main() {
-    // Задача 1
-    let numbers = vec![34, 50, 25, 100, 65];
-    println!("largest number: {}", largest(&numbers));
-    let chars = vec!['y', 'm', 'a', 'q'];
-    println!("largest char: {}", largest(&chars));
-
-    // Задача 2
-    print_largest(&numbers);
-    print_largest(&chars);
-
-    // Задача 3
-    let pair = Pair { first: 10, second: 20 };
-    println!("larger: {}", pair.larger());
-    let pair_str = Pair { first: "apple", second: "banana" };
-    println!("larger: {}", pair_str.larger());
-
-    // Задача 4
-    let mut r8 = Reg8 { addr: 0x4000_0000, value: 0xFF };
-    let mut r16 = Reg16 { addr: 0x4000_0004, value: 0x1234 };
-    print_register(&r8);
-    print_register(&r16);
-    r8.write(0x00);
-    r16.write(0x5678);
-    print_register(&r8);
-    print_register(&r16);
-
-    // Задача 5
-    let regs: Vec<&dyn Register<Value = u8>> = vec![
-        &Reg8 { addr: 0x00, value: 0xAA },
-        &Reg8 { addr: 0x01, value: 0xBB },
-    ];
-    dump_registers(&regs);
+    println!("=== Task 1 ===");
+    task1();
+    println!("\n=== Task 2 ===");
+    task2();
+    println!("\n=== Task 3 ===");
+    task3();
+    println!("\n=== Task 4 ===");
+    task4();
+    println!("\n=== Task 5 ===");
+    task5();
 }
