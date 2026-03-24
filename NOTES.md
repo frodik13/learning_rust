@@ -179,3 +179,59 @@ let sensors: Vec<Box<dyn Sensor>> = vec![
 | Трейт не object-safe | только `impl Trait` |
 
 Для embedded — почти всегда `impl Trait` (нет indirect calls, не нужен `Box`/куча).
+
+### 3.2 Generics, Trait Bounds, Associated Types
+
+**Generic функция с trait bound:**
+```rust
+fn largest<T: PartialOrd>(list: &[T]) -> &T { ... }
+```
+
+**Несколько bounds — два синтаксиса:**
+```rust
+fn f<T: PartialOrd + Display>(x: &T) { ... }
+fn f<T>(x: &T) where T: PartialOrd + Display { ... }  // where — читабельнее
+```
+
+**Generic struct — bound на impl, не на struct:**
+```rust
+struct Pair<T> { first: T, second: T }  // хранит любой T
+
+impl<T: PartialOrd> Pair<T> {          // метод only для сравнимых T
+    fn larger(&self) -> &T { ... }
+}
+```
+
+**Associated type vs Generic в trait:**
+```rust
+// Generic — можно реализовать НЕСКОЛЬКО раз
+trait Convert<T> { fn convert(&self) -> T; }
+impl Convert<f64> for X { ... }
+impl Convert<String> for X { ... }  // оба OK
+
+// Associated type — реализуешь ОДИН раз, тип фиксирован
+trait Register {
+    type Value;
+    fn read(&self) -> Self::Value;
+}
+impl Register for Reg8 { type Value = u8; ... }
+```
+
+Правило: тип логически один для реализации → associated type. Может быть несколько → generic.
+
+**Bound на associated type:**
+```rust
+fn print_register<R: Register>(reg: &R)
+where
+    R::Value: Display,  // "Value должен быть печатаемым"
+{
+    println!("0x{:08X} = {}", reg.address(), reg.read());
+}
+```
+
+**dyn Trait с associated type — нужно фиксировать Value:**
+```rust
+// dyn Register          — ОШИБКА: компилятор не знает размер Value
+// dyn Register<Value = u8>  — OK: Value зафиксирован, vtable можно построить
+let regs: Vec<&dyn Register<Value = u8>> = vec![&r1, &r2];
+```
