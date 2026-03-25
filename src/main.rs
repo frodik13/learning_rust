@@ -1,145 +1,142 @@
-// === ЗАДАНИЕ 3.4: Итераторы ===
+// === ЗАДАНИЕ 3.5: Error Handling ===
 
-// --- Задача 1: Базовые адаптеры ---
-// Перепиши каждую функцию с for-цикла на цепочку итераторов.
-// НЕ используй for, while, loop — только методы итераторов.
-fn sum_of_squares_loop(numbers: &[i32]) -> i32 {
-    let mut sum = 0;
-    for n in numbers {
-        sum += n * n;
-    }
-    sum
+use std::fmt;
+use std::num::ParseIntError;
+
+// --- Задача 1: Оператор ? ---
+// Напиши функцию, которая парсит строку "ключ=значение" и возвращает (ключ, число).
+// Может упасть на: нет '=', значение не число.
+// Пока используй String как тип ошибки.
+fn parse_key_value(input: &str) -> Result<(String, i32), String> {
+    let (key, val) = input.split_once("=").ok_or("нет '='")?;
+    let num = val.parse::<i32>().map_err(|e| e.to_string())?;
+    Ok((key.to_string(), num))
 }
 
-// Перепиши через .map().sum()
-fn sum_of_squares(numbers: &[i32]) -> i32 {
-    numbers.iter().map(|x| x * x).sum()
+fn task1() {
+    println!("{:?}", parse_key_value("temperature=25")); // Ok(("temperature", 25))
+    println!("{:?}", parse_key_value("broken")); // Err(...)
+    println!("{:?}", parse_key_value("count=abc")); // Err(...)
 }
 
-fn even_names_loop(names: &[&str]) -> Vec<String> {
-    let mut result = Vec::new();
-    for (i, name) in names.iter().enumerate() {
-        if i % 2 == 0 {
-            result.push(name.to_uppercase());
+// --- Задача 2: Свой тип ошибки ---
+// String как ошибка — плохо: нельзя программно обработать разные случаи.
+// Создай enum ConfigError с вариантами:
+//   - MissingEquals         — нет символа '='
+//   - InvalidValue(ParseIntError) — значение не парсится в число
+//
+// Реализуй Display и std::error::Error для ConfigError.
+// Перепиши parse_key_value_v2 используя ConfigError.
+
+#[derive(Debug)]
+enum ConfigError {
+    MissingEquals,
+    InvalidValue(ParseIntError),
+}
+
+impl fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ConfigError::MissingEquals => write!(f, "нет символа '='"),
+            ConfigError::InvalidValue(_) => write!(f, "значение не парсится в число"),
         }
     }
-    result
+}
+impl std::error::Error for ConfigError {}
+
+// Подсказка: impl From<ParseIntError> for ConfigError позволит использовать ? напрямую.
+impl From<ParseIntError> for ConfigError {
+    fn from(value: ParseIntError) -> Self {
+        ConfigError::InvalidValue(value)
+    }
 }
 
-// Перепиши через .enumerate().filter().map().collect()
-fn even_names(names: &[&str]) -> Vec<String> {
-    names
+fn parse_key_value_v2(input: &str) -> Result<(String, i32), ConfigError> {
+    let split: Vec<&str> = input.split('=').collect();
+    if split.len() != 2 {
+        Err(ConfigError::MissingEquals)
+    } else {
+        let int = split[1].parse::<i32>()?;
+
+        Ok((split[0].to_string(), int))
+    }
+}
+
+fn task2() {
+    println!("{:?}", parse_key_value_v2("temperature=25")); // Ok(...)
+    println!("error: {}", parse_key_value_v2("broken").unwrap_err());
+    println!("error: {}", parse_key_value_v2("count=abc").unwrap_err());
+}
+
+// --- Задача 3: Пробрасывание через ? ---
+// Функция читает "конфиг" (вектор строк "ключ=значение")
+// и возвращает сумму всех значений.
+// Если хоть одна строка невалидна — возвращает ошибку.
+// Используй parse_key_value_v2 и оператор ?.
+
+fn sum_config_values(lines: &[&str]) -> Result<i32, ConfigError> {
+    let mut sum = 0;
+    for line in lines {
+        let parse = parse_key_value_v2(line)?;
+        sum += parse.1;
+    }
+
+    Ok(sum)
+}
+
+fn task3() {
+    let valid = vec!["a=1", "b=2", "c=3"];
+    println!("sum: {:?}", sum_config_values(&valid)); // Ok(6)
+
+    let invalid = vec!["a=1", "broken", "c=3"];
+    println!("sum: {:?}", sum_config_values(&invalid)); // Err(MissingEquals)
+}
+
+// --- Задача 4: Разная обработка разных ошибок ---
+// Напиши функцию, которая вызывает parse_key_value_v2 и обрабатывает ошибки:
+// - MissingEquals → подставляет значение по умолчанию 0
+// - InvalidValue → пробрасывает ошибку дальше
+// Используй match на Result.
+
+fn parse_or_default(input: &str) -> Result<(String, i32), ConfigError> {
+    match parse_key_value_v2(input) {
+        Ok(r) => Ok(r),
+        Err(ConfigError::MissingEquals) => Ok((input.to_string(), 0)),
+        Err(e) => Err(e),
+    }
+}
+
+fn task4() {
+    println!("{:?}", parse_or_default("temp=25")); // Ok(("temp", 25))
+    println!("{:?}", parse_or_default("flag")); // Ok(("flag", 0))
+    println!("{:?}", parse_or_default("bad=xyz")); // Err(InvalidValue(...))
+}
+
+// --- Задача 5: Collect Result ---
+// Фишка Rust: .collect() может собирать Vec<Result<T,E>> в Result<Vec<T>, E>.
+// Первая ошибка останавливает сбор.
+// Спарси все строки в числа, вернув либо Vec<i32> либо первую ошибку.
+fn parse_all(input: &[&str]) -> Result<Vec<i32>, ParseIntError> {
+    input
         .iter()
-        .enumerate()
-        .filter(|name| name.0 % 2 == 0)
-        .map(|name| name.1.to_uppercase())
+        .map(|x| x.parse::<i32>())
         .collect()
 }
 
-// --- Задача 2: fold —  самый мощный адаптер ---
-// fold = Aggregate в C#. Из него можно выразить почти всё.
-// Найди самую длинную строку в слайсе через .fold()
-// Если слайс пустой — верни ""
-fn longest_word<'a>(words: &[&'a str]) -> &'a str {
-    words.iter().fold(
-        "",
-        |acc, &word| {
-            if word.len() > acc.len() { word } else { acc }
-        },
-    )
-}
-
-// --- Задача 3: Свой итератор ---
-// Создай структуру `Countdown` которая считает от n до 0 (включительно).
-// Реализуй для неё trait Iterator с Item = u32.
-//
-// let c = Countdown::new(3);
-// c.next() → Some(3)
-// c.next() → Some(2)
-// c.next() → Some(1)
-// c.next() → Some(0)
-// c.next() → None
-
-struct Countdown {
-    // твои поля
-    current: Option<u32>
-}
-
-impl Countdown {
-    pub fn new(start: u32) -> Self {
-        Self { current: Some(start) }
-    }
-}
-
-impl Iterator for Countdown {
-    type Item = u32;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let val = self.current?;
-        self.current = val.checked_sub(1);
-        Some(val)
-    }
-}
-
-// --- Задача 4: Цепочки итераторов ---
-// Дан вектор строк. Нужно:
-// 1. Отфильтровать пустые строки
-// 2. Обрезать пробелы по краям (trim)
-// 3. Преобразовать в UPPERCASE
-// 4. Собрать в одну строку через ", "
-// Всё — одной цепочкой.
-fn clean_and_join(input: &[&str]) -> String {
-    input
-        .iter()
-        .map(|x| x.trim().to_uppercase())
-        .filter(|x| !x.is_empty())
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-// --- Задача 5: Iterator + Option ---
-// Дан слайс строк, каждая может быть числом или нет.
-// Спарси только валидные числа и верни их сумму.
-// Подсказка: .filter_map() — это .filter() + .map() в одном.
-// str::parse::<i32>() возвращает Result, а .ok() превращает его в Option.
-fn sum_valid_numbers(input: &[&str]) -> i32 {
-    input
-        .iter()
-        .filter_map(|s| s.parse::<i32>().ok())
-        .sum()
+fn task5() {
+    println!("{:?}", parse_all(&["1", "2", "3"]));       // Ok([1, 2, 3])
+    println!("{:?}", parse_all(&["1", "abc", "3"]));     // Err(...)
 }
 
 fn main() {
-    // Задача 1
-    let nums = vec![1, 2, 3, 4, 5];
-    println!("sum of squares (loop): {}", sum_of_squares_loop(&nums));
-    println!("sum of squares (iter): {}", sum_of_squares(&nums)); // 55
-
-    let names = vec!["Alice", "Bob", "Charlie", "Dave", "Eve"];
-    println!("even names (loop): {:?}", even_names_loop(&names));
-    println!("even names (iter): {:?}", even_names(&names)); // ["ALICE", "CHARLIE", "EVE"]
-
-    // Задача 2
-    let words = vec!["hi", "hello", "hey", "greetings"];
-    println!("longest: {}", longest_word(&words)); // greetings
-
-    let words = vec![];
-    println!("longest: {}", longest_word(&words));
-
-    // Задача 3
-    let countdown = Countdown::new(5);
-    let nums: Vec<u32> = countdown.collect();
-    println!("countdown: {:?}", nums); // [5, 4, 3, 2, 1, 0]
-
-    // Бонус: раз Countdown — итератор, все адаптеры работают бесплатно:
-    let sum: u32 = Countdown::new(10).sum();
-    println!("sum 0..=10: {}", sum); // 55
-
-    // Задача 4
-    let messy = vec!["  hello ", "", " world  ", "  ", "  rust "];
-    println!("cleaned: {}", clean_and_join(&messy)); // "HELLO, WORLD, RUST"
-
-    // Задача 5
-    let mixed = vec!["42", "abc", "7", "", "13", "xyz", "0"];
-    println!("sum of valid: {}", sum_valid_numbers(&mixed)); // 62
+    println!("=== Task 1 ===");
+    task1();
+    println!("\n=== Task 2 ===");
+    task2();
+    println!("\n=== Task 3 ===");
+    task3();
+    println!("\n=== Task 4 ===");
+    task4();
+    println!("\n=== Task 5 ===");
+    task5();
 }

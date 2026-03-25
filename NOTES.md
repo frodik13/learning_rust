@@ -345,3 +345,54 @@ impl Iterator for Countdown {
 ```
 Итератор = O(1) по памяти. Не создавай Vec заранее — вычисляй по запросу.
 Реализовав Iterator, бесплатно получаешь `.map()`, `.filter()`, `.sum()`, `.collect()` и все остальные адаптеры.
+
+### 3.5 Error Handling
+
+**В Rust нет исключений.** Вместо `try/catch` — `Result<T, E>` и оператор `?`.
+
+**Оператор `?`** — пробрасывает ошибку наверх (как throw, но на этапе компиляции):
+```rust
+fn read_config(path: &str) -> Result<String, io::Error> {
+    let content = std::fs::read_to_string(path)?;  // Err → сразу return Err
+    Ok(content.trim().to_string())
+}
+```
+
+**`split_once` + `ok_or` — идиоматичный парсинг:**
+```rust
+let (key, val) = input.split_once('=').ok_or("нет '='")?;  // Option → Result
+let num = val.parse::<i32>().map_err(|e| e.to_string())?;  // конвертация ошибки
+```
+
+**Свой тип ошибки:**
+```rust
+#[derive(Debug)]
+enum ConfigError {
+    MissingEquals,
+    InvalidValue(ParseIntError),
+}
+
+impl fmt::Display for ConfigError { ... }
+impl std::error::Error for ConfigError {}
+
+// From позволяет ? автоматически конвертировать ParseIntError → ConfigError
+impl From<ParseIntError> for ConfigError {
+    fn from(e: ParseIntError) -> Self { ConfigError::InvalidValue(e) }
+}
+```
+После `impl From` можно писать `let num = val.parse::<i32>()?;` — `?` вызовет `.into()` автоматически.
+
+**Match на ошибке — разная обработка разных случаев:**
+```rust
+match parse_key_value_v2(input) {
+    Ok(r) => Ok(r),
+    Err(ConfigError::MissingEquals) => Ok((input.to_string(), 0)),  // recover
+    Err(e) => Err(e),  // propagate
+}
+```
+
+**Collect в Result — мощный паттерн:**
+```rust
+// Vec<Result<T,E>> → Result<Vec<T>, E>. Первая ошибка останавливает сбор.
+input.iter().map(|x| x.parse::<i32>()).collect::<Result<Vec<_>, _>>()
+```

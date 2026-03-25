@@ -15,7 +15,7 @@
 - [x] **3.2** Generics + trait bounds + associated types (когда что использовать)
 - [x] **3.3** Closures: Fn/FnMut/FnOnce, захват переменных, move closures
 - [x] **3.4** Итераторы: ленивость, свой итератор, zero-cost абстракция
-- [ ] **3.5** Error handling: thiserror, From конверсии, error propagation паттерны
+- [x] **3.5** Error handling: thiserror, From конверсии, error propagation паттерны
 - [ ] **3.6** Enums как state machines, newtype pattern, type-level programming
 
 ## Фаза 4: Память и unsafe
