@@ -600,3 +600,63 @@ pub fn read_register(addr: u32) -> u32 {
     unsafe { std::ptr::read_volatile(addr as *const u32) }
 }
 ```
+
+### 4.4 FFI: вызов C из Rust
+
+**Объявление C-функций:**
+```rust
+unsafe extern "C" {
+    fn abs(x: c_int) -> c_int;
+    fn strlen(s: *const c_char) -> usize;
+    fn getpid() -> c_int;
+}
+// Вызов — всегда unsafe { abs(-42) }
+```
+
+**Типы C ↔ Rust:**
+
+| C | Rust |
+|---|---|
+| `int` | `c_int` (`std::os::raw`) |
+| `char*` | `*const c_char` / `*mut c_char` |
+| `void*` | `*mut c_void` |
+| `size_t` | `usize` |
+
+**Строки C ↔ Rust:**
+- `CString::new("text")` — Rust → C (добавляет `\0`)
+- `CStr::from_ptr(ptr).to_str()` — C → Rust
+
+**`#[repr(C)]` — layout структуры совпадает с C:**
+```rust
+#[repr(C)]
+struct Point { x: f64, y: f64 }
+```
+Без `repr(C)` Rust может переупорядочить поля!
+
+**extern "C" fn — Rust-функция с C ABI (можно вызвать из C):**
+```rust
+extern "C" fn distance(p: *const Point) -> f64 {
+    unsafe { ((*p).x.powi(2) + (*p).y.powi(2)).sqrt() }
+}
+```
+
+**Safe обёртка над FFI (главный паттерн):**
+```rust
+fn parse_c_int(s: &str, base: i32) -> Option<i64> {
+    let c_string = CString::new(s).unwrap();
+    let start = c_string.as_ptr();
+    let mut endptr: *mut c_char = std::ptr::null_mut();
+    let result = unsafe { strtol(start, &mut endptr, base) };
+    if endptr == start as *mut c_char { None } else { Some(result) }
+}
+```
+
+**Callback: C вызывает Rust через function pointer:**
+```rust
+unsafe extern "C" fn compare_ints(a: *const c_void, b: *const c_void) -> c_int {
+    let a_val = *(a as *const i32);  // разыменование, не каст адреса!
+    let b_val = *(b as *const i32);
+    a_val - b_val
+}
+// a, b — УКАЗАТЕЛИ на данные, не сами данные. Каст адреса в i32 — ошибка.
+```

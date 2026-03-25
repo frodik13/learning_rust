@@ -1,159 +1,157 @@
-// === ЗАДАНИЕ 4.3: Unsafe Rust ===
+// === ЗАДАНИЕ 4.4: FFI ===
 
+use std::ffi::{CStr, CString};
 use std::fmt;
+use std::os::raw::{c_char, c_double, c_int};
 
-// --- Задача 1: Raw pointers ---
-// Создай две переменные i32. Получи raw pointers на них.
-// Через unsafe прочитай значения и выведи сумму.
-// Потом поменяй значение через *mut pointer.
-fn task1() {
-    let mut x = 10;
-    let y = 20;
+// --- Задача 1: Вызов C-функций из libc ---
+// Объяви extern блок с функциями: abs, sqrt (из libm), getpid.
+// Вызови каждую.
 
-    // Создай raw pointers (это safe)
-    let ptr_x: *mut i32 = &mut x;
-    let ptr_y: *const i32 = &y;
-
-    // Прочитай через unsafe и выведи сумму
-    unsafe { println!("sum = {}", *ptr_x + *ptr_y); }
-
-    // Измени x через ptr_x
-    unsafe { *ptr_x = 5; }
-    println!("x after mutation = {}", x);
+unsafe extern "C" {
+    fn abs(x: c_int) -> c_int;
+    fn sqrt(x: c_double) -> c_double;
+    fn getpid() -> c_int;
 }
 
-// --- Задача 2: unsafe функция ---
-// Напиши unsafe функцию, которая читает N байт из raw pointer.
-// Это реальный паттерн: драйвер читает из memory-mapped регистра.
-//
-// unsafe fn read_bytes(ptr: *const u8, len: usize) -> Vec<u8>
-//
-// Внутри: создай Vec, скопируй байты из ptr.
-// Подсказка: std::ptr::read() или std::slice::from_raw_parts()
-
-// твой код тут...
-unsafe fn read_bytes(ptr: *const u8, len: usize) -> Vec<u8> {
+fn task1() {
     unsafe {
-        let slice = std::slice::from_raw_parts(ptr, len);   
-        let mut result = Vec::new();
-        result.extend_from_slice(&slice);
-        result
+        println!("abs(-42) = {}", abs(-42));
+        println!("sqrt(144) = {}", sqrt(144.0));
+        println!("pid = {}", getpid());
     }
+}
+
+// --- Задача 2: Строки между C и Rust ---
+// C-строка: *const c_char, заканчивается нулём '\0'.
+// Rust String: UTF-8, знает длину, нет нуля на конце.
+// Нужны конверторы: CString (Rust → C), CStr (C → Rust).
+//
+// Объяви extern: fn strlen(s: *const c_char) -> usize;
+// Создай CString из Rust строки, передай в strlen, выведи результат.
+
+unsafe extern "C" {
+    fn strlen(s: *const c_char) -> usize;
 }
 
 fn task2() {
-    let data: [u8; 5] = [0xDE, 0xAD, 0xBE, 0xEF, 0x42];
-    let ptr = data.as_ptr();
+    let rust_str = "Hello from Rust!";
+    let c_string = CString::new(rust_str).unwrap();
+    let len = unsafe { strlen(c_string.as_ptr()) };
+    println!("strlen(\"{}\") = {}", rust_str, len);
 
-    unsafe {
-        let bytes = read_bytes(ptr, 5);
-        println!("bytes: {:02X?}", bytes); // [DE, AD, BE, EF, 42]
-    
-        // Читаем только 3 байта с offset 1
-        let partial = read_bytes(ptr.add(1), 3);
-        println!("partial: {:02X?}", partial); // [AD, BE, EF]
-    }
+    // Обратно: C-строка → Rust &str
+    let back_to_rust: &str = unsafe { CStr::from_ptr(c_string.as_ptr()).to_str().unwrap() };
+    println!("back: {}", back_to_rust);
 }
 
-// --- Задача 3: transmute — самая опасная функция ---
-// std::mem::transmute переинтерпретирует биты одного типа как другой.
-// Как reinterpret_cast в C++. Размеры ДОЛЖНЫ совпадать.
+// --- Задача 3: repr(C) структуры ---
+// На RPi через ioctl часто передают структуры в C-код.
+// Layout ДОЛЖЕН совпадать.
 //
-// Задача: преобразуй [u8; 4] в u32 (little-endian) через transmute.
-// Потом сделай то же самое БЕЗОПАСНО через u32::from_le_bytes.
+// Создай #[repr(C)] struct Point { x: f64, y: f64 }
+// Напиши extern "C" fn distance(p: *const Point) -> f64
+// — ЭТО будет Rust-функция с C ABI (можно вызвать из C-кода).
+// Внутри: unsafe прочитай поля и верни sqrt(x² + y²).
+
+#[repr(C)]
+struct Point {
+    x: f64,
+    y: f64,
+}
+
+extern "C" fn distance(p: *const Point) -> f64 {
+    unsafe {
+        let x = (*p).x;
+        let y = (*p).y;
+
+        (x * x + y * y).sqrt()
+    }
+}
+
 fn task3() {
-    let bytes: [u8; 4] = [0x78, 0x56, 0x34, 0x12];
-
-    // unsafe способ
-    let value: u32 = unsafe { std::mem::transmute(bytes) };
-    println!("transmute: 0x{:08X}", value);
-
-    // safe способ — ВСЕГДА предпочитай этот
-    let value_safe = u32::from_le_bytes(bytes);
-    println!("from_le_bytes: 0x{:08X}", value_safe);
+    let p = Point { x: 3.0, y: 4.0 };
+    let d = distance(&p as *const Point);
+    println!("distance = {}", d); // 5.0
 }
 
-// --- Задача 4: unsafe trait impl ---
-// Допустим у нас есть trait, который гарантирует что тип
-// безопасно обнулять (все нули — валидное значение).
-// Это unsafe trait — реализующий ОБЕЩАЕТ что это правда.
-// Компилятор не проверяет — ты берёшь ответственность.
+// --- Задача 4: Safe обёртка над unsafe FFI ---
+// Это главный паттерн: unsafe FFI внутри, safe API снаружи.
+//
+// Задача: оберни C-функцию strtol (строка → число).
+// extern "C" { fn strtol(s: *const c_char, endptr: *mut *mut c_char, base: c_int) -> i64; }
+//
+// Создай safe функцию: fn parse_c_int(s: &str, base: i32) -> Option<i64>
+// - Конвертируй &str → CString
+// - Вызови strtol
+// - Если endptr == начало строки (ничего не спарсилось) → None
+// - Иначе → Some(результат)
 
-unsafe trait Zeroable {
-    fn zeroed() -> Self;
+unsafe extern "C" {
+    fn strtol(s: *const c_char, endptr: *mut *mut c_char, base: c_int) -> i64;
 }
 
-// Реализуй Zeroable для u8, u16, u32.
-// НЕ реализуй для bool (0 = false, но unsafe trait не стоит
-// реализовывать для типов, где это неочевидно).
-// НЕ реализуй для String (обнулённый String = dangling pointer = UB).
+fn parse_c_int(s: &str, base: i32) -> Option<i64> {
+    let c_string = CString::new(s).unwrap();
+    let start = c_string.as_ptr();
+    let mut endptr: *mut c_char = std::ptr::null_mut();
+    let result = unsafe { strtol(start, &mut endptr, base) };
 
-// unsafe impl Zeroable for ??? { ... }
-
-// Напиши safe обёртку:
-// fn zero_init<T: Zeroable>() -> T { T::zeroed() }
-unsafe impl Zeroable for u8 {
-    fn zeroed() -> Self {
-        0x00
+    if endptr == start as *mut c_char {
+        None
+    } else {
+        Some(result)
     }
-}
-
-unsafe impl Zeroable for u16 {
-    fn zeroed() -> Self {
-        0x00
-    }
-}
-
-unsafe impl Zeroable for u32 {
-    fn zeroed() -> Self {
-        0x00
-    }
-}
-
-fn zero_init<T: Zeroable>() -> T {
-    T::zeroed()
 }
 
 fn task4() {
-    let x: u32 = zero_init();
-    let y: u8 = zero_init();
-    println!("zeroed u32: {}", x); // 0
-    println!("zeroed u8: {}", y);  // 0
+    println!("{:?}", parse_c_int("42", 10)); // Some(42)
+    println!("{:?}", parse_c_int("0xFF", 16)); // Some(255)
+    println!("{:?}", parse_c_int("1010", 2)); // Some(10)
+    println!("{:?}", parse_c_int("hello", 10)); // None
 }
 
-// --- Задача 5: Когда НЕ использовать unsafe ---
-// Перепиши этот unsafe код в safe Rust. Unsafe тут не нужен.
-fn find_max_unsafe(data: &[i32]) -> i32 {
-    assert!(!data.is_empty());
-    unsafe {
-        let mut max = *data.get_unchecked(0);
-        let mut i = 1;
-        while i < data.len() {
-            let val = *data.get_unchecked(i);
-            if val > max {
-                max = val;
-            }
-            i += 1;
-        }
-        max
-    }
+// --- Задача 5: Callback из C в Rust ---
+// C-код может вызывать Rust-функции через указатели на функции.
+// Это используется для callbacks (например, обработчик сигналов на Linux).
+//
+// Объяви C-функцию qsort:
+// void qsort(void *base, size_t nmemb, size_t size,
+//             int (*compar)(const void *, const void *));
+//
+// Напиши Rust callback compare_ints с сигнатурой extern "C".
+// Отсортируй массив i32 через qsort.
+
+unsafe extern "C" {
+    fn qsort(
+        base: *mut std::ffi::c_void,
+        nmemb: usize,
+        size: usize,
+        compar: unsafe extern "C" fn(*const std::ffi::c_void, *const std::ffi::c_void) -> c_int,
+    );
 }
 
-fn find_max_safe(data: &[i32]) -> i32 {
-    let mut max = data[0];
-    for i in 1..data.len() {
-        if data[i] > max {
-            max = data[i];
-        }
-    }
+unsafe extern "C" fn compare_ints(a: *const std::ffi::c_void, b: *const std::ffi::c_void) -> c_int {
+    let a_val = unsafe { *(a as *const i32) };
+    let b_val = unsafe { *(b as *const i32) };
 
-    max
+    a_val - b_val
 }
 
 fn task5() {
-    let data = vec![3, 7, 1, 9, 4];
-    println!("unsafe: {}", find_max_unsafe(&data));
-    println!("safe: {}", find_max_safe(&data));
+    let mut data = vec![5, 3, 8, 1, 9, 2];
+    println!("before: {:?}", data);
+
+    unsafe {
+        qsort(
+            data.as_mut_ptr() as *mut std::ffi::c_void,
+            data.len(),
+            std::mem::size_of::<i32>(),
+            compare_ints,
+        );
+    }
+
+    println!("after:  {:?}", data); // [1, 2, 3, 5, 8, 9]
 }
 
 fn main() {
