@@ -521,3 +521,34 @@ fn log_message(log: &SharedLog, msg: &str) {
     log.borrow_mut().push(msg.to_string());
 }
 ```
+
+### 4.2 Drop trait, деструкторы, порядок дропа
+
+**Drop trait — аналог IDisposable, но автоматический:**
+```rust
+impl Drop for GpioPin {
+    fn drop(&mut self) {
+        println!("GPIO {}: unexported", self.pin);
+    }
+}
+```
+
+**Правила:**
+- `x.drop()` — **запрещено** вызывать вручную (double free)
+- `drop(x)` — `std::mem::drop`, перемещает x и вызывает Drop
+- Переменные дропаются в **обратном** порядке объявления (LIFO, как стек)
+- Структура: сначала `Drop::drop()` самой структуры, потом поля в порядке объявления
+- Rc дропает данные только когда `strong_count == 0`
+
+**RAII (Resource Acquisition Is Initialization):**
+Получил ресурс → создал объект. Объект умер → ресурс освободился. Автоматически.
+
+| Ресурс | Конструктор | Drop |
+|---|---|---|
+| Файл | `File::open()` | закрывает fd |
+| Мьютекс | `mutex.lock()` → MutexGuard | разблокирует |
+| GPIO pin | export | unexport |
+| TCP соединение | `TcpStream::connect()` | закрывает сокет |
+
+Невозможно забыть освободить ресурс — компилятор вставляет drop() автоматически.
+В C# нужен `using`/`Dispose()`, в Rust — бесплатно.

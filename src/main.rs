@@ -1,224 +1,124 @@
-// === ЗАДАНИЕ 4.1: Smart Pointers ===
+// === ЗАДАНИЕ 4.2: Drop trait ===
 
-use std::arch::naked_asm;
 use std::cell::RefCell;
-use std::collections::VecDeque;
-use std::fmt;
 use std::rc::Rc;
 
-// --- Задача 1: Box и рекурсивные типы ---
-// Создай бинарное дерево:
-//   enum Tree<T> {
-//       Leaf(T),
-//       Node { left: ???, right: ??? },
-//   }
-// Без Box не скомпилируется — почему?
-// Реализуй метод fn sum(&self) -> i32 для Tree<i32> (сумма всех значений).
-
-// твой код тут...
-enum Tree<T> {
-    Leaf(T),
-    Node {
-        left: Box<Tree<T>>,
-        right: Box<Tree<T>>,
-    },
+// --- Задача 1: Предскажи порядок дропа ---
+// Структура с именем, которая печатает при дропе.
+struct Named {
+    name: String,
 }
 
-impl Tree<i32> {
-    fn sum(&self) -> i32 {
-        let mut sum = 0;
-
-        let mut queue: VecDeque<&Tree<i32>> = VecDeque::new();
-        queue.push_back(self);
-        while !queue.is_empty() {
-            let node = queue.pop_back();
-            match node {
-                Some(n) => match n {
-                    Tree::Leaf(value) => sum += value,
-                    Tree::Node { left, right } => {
-                        queue.push_back(left);
-                        queue.push_back(right);
-                    }
-                },
-                None => continue,
-            }
-        }
-
-        sum
+impl Drop for Named {
+    fn drop(&mut self) {
+        println!("  drop: {}", self.name);
     }
 }
 
+// Предскажи порядок вывода, потом запусти и проверь.
 fn task1() {
-    let tree = Tree::Node {
-        left: Box::new(Tree::Node {
-            left: Box::new(Tree::Leaf(1)),
-            right: Box::new(Tree::Leaf(2)),
-        }),
-        right: Box::new(Tree::Leaf(3)),
-    };
-    println!("sum = {}", tree.sum()); // 6
+    println!("--- переменные ---");
+    let _a = Named { name: "A".into() };
+    let _b = Named { name: "B".into() };
+    let _c = Named { name: "C".into() };
+    // В каком порядке дропнутся?
+    // _a, _b, _c.
 }
 
-// --- Задача 2: Rc — несколько владельцев ---
-// Сценарий: на RPi несколько задач читают из одного конфига.
-// Config нельзя клонировать (дорого), но несколько частей кода
-// должны иметь доступ к нему.
-//
-// struct Config { device_name: String, pin_count: u8 }
-// struct GpioManager { config: ??? }
-// struct Logger { config: ??? }
-//
-// Создай один Config, оберни в Rc, передай в оба.
-// Убедись что оба читают одни и те же данные.
-// Выведи Rc::strong_count на каждом шаге.
-
-// твой код тут...
-struct Config {
-    device_name: String,
-    pin_count: u8,
-}
-
-struct GpioManager {
-    config: Rc<Config>,
-}
-
-struct Logger {
-    config: Rc<Config>,
-}
-
+// --- Задача 2: drop() vs .drop() ---
+// Раскомментируй поочерёдно и объясни — почему одно работает, а другое нет? Такие усорвия языка.
 fn task2() {
-    let config = Rc::new(Config {
-        device_name: "RPi4".to_string(),
-        pin_count: 40,
-    });
-    println!("count after create: {}", Rc::strong_count(&config));
-
-    let gpio = GpioManager {
-        config: Rc::clone(&config),
+    let a = Named {
+        name: "explicit".into(),
     };
-    println!("count after gpio: {}", Rc::strong_count(&config));
-
-    let logger = Logger {
-        config: Rc::clone(&config),
-    };
-    println!("count after logger: {}", Rc::strong_count(&config));
-
-    println!(
-        "gpio sees: {} ({} pins)",
-        gpio.config.device_name, gpio.config.pin_count
-    );
-    println!(
-        "logger sees: {} ({} pins)",
-        logger.config.device_name, logger.config.pin_count
-    );
-
-    drop(gpio);
-    println!("count after drop gpio: {}", Rc::strong_count(&config));
+    // a.drop();     // вариант 1
+    drop(a); // вариант 2
+    println!("task2 end");
 }
 
-// --- Задача 3: RefCell — interior mutability ---
-// Сценарий: несколько модулей пишут в общий лог.
-// Лог должен быть мутабельным, но Rc не даёт &mut.
-// Решение: Rc<RefCell<Vec<String>>>
-//
-// Создай SharedLog = Rc<RefCell<Vec<String>>>
-// Напиши функцию fn log_message(log: &SharedLog, msg: &str)
-// Напиши функцию fn print_log(log: &SharedLog)
-
-type SharedLog = Rc<RefCell<Vec<String>>>;
-
-fn log_message(log: &SharedLog, msg: &str) {
-    log.borrow_mut().push(msg.to_string());
+// --- Задача 3: Drop в структуре ---
+// Предскажи порядок: сначала сама структура или поля? Сначала поля
+struct Wrapper {
+    first: Named,
+    second: Named,
 }
 
-fn print_log(log: &SharedLog) {
-    let l = log.borrow();
-    l.iter().for_each(|x| println!("{x}"));
+impl Drop for Wrapper {
+    fn drop(&mut self) {
+        println!("  drop: Wrapper itself");
+    }
 }
 
 fn task3() {
-    let log = Rc::new(RefCell::new(Vec::new()));
-
-    log_message(&log, "System started");
-    log_message(&log, "GPIO initialized");
-
-    let log2 = Rc::clone(&log);
-    log_message(&log2, "Sensor reading: 25.5°C");
-
-    print_log(&log); // все 3 сообщения
-    println!("log refs: {}", Rc::strong_count(&log));
+    let _w = Wrapper {
+        first: Named {
+            name: "first field".into(),
+        },
+        second: Named {
+            name: "second field".into(),
+        },
+    };
 }
 
-// --- Задача 4: Box<dyn Trait> — owned trait objects ---
-// Создай trait Device с методом fn status(&self) -> String
-// Создай два типа: Led { pin: u8, on: bool } и Buzzer { pin: u8, freq: u32 }
-// Реализуй Device для обоих.
-//
-// Создай функцию fn create_devices() -> Vec<Box<dyn Device>>
-// которая возвращает вектор разных устройств.
-// Почему тут Box, а не &dyn? Потому что устройства создаются внутри функции
-// и должны ЖИТЬ после возврата. Ссылка на локальную переменную — dangling.
+// --- Задача 4: RAII паттерн ---
+// Создай структуру GpioPin, которая:
+// - При создании (new) печатает "GPIO {pin}: exported"
+// - При дропе печатает "GPIO {pin}: unexported"
+// Это RAII — ресурс захватывается в конструкторе, освобождается в деструкторе.
+// На реальном RPi: new() пишет в /sys/class/gpio/export,
+//                  drop() пишет в /sys/class/gpio/unexport.
 
 // твой код тут...
-trait Device {
-    fn status(&self) -> String;
+struct GpioPin {
+    pin: u32,
 }
 
-struct Led {
-    pin: u8,
-    on: bool,
-}
-
-struct Buzzer {
-    pin: u8,
-    freq: u32,
-}
-
-impl Device for Led {
-    fn status(&self) -> String {
-        format!("Led pin: {} status {}", self.pin, self.on)
+impl GpioPin {
+    fn new(pin: u32) -> Self {
+        println!("GPIO {pin}: exported");
+        Self { pin }
     }
 }
 
-impl Device for Buzzer {
-    fn status(&self) -> String {
-        format!("Buzzer pin: {}, freq: {}", self.pin, self.freq)
+impl Drop for GpioPin {
+    fn drop(&mut self) {
+        println!("GPIO {}: unexported", self.pin);
     }
-}
-
-fn create_devices() -> Vec<Box<dyn Device>> {
-    let mut result: Vec<Box<dyn Device>> = Vec::new();
-
-    let led = Box::new(Led { pin: 8, on: false });
-    let buzzer = Box::new(Buzzer { pin: 13, freq: 33 });
-
-    result.push(led);
-    result.push(buzzer);
-
-    result
 }
 
 fn task4() {
-    let devices = create_devices();
-    for dev in &devices {
-        println!("{}", dev.status());
-    }
+    println!("--- создаём пины ---");
+    let _pin1 = GpioPin::new(17);
+    let _pin2 = GpioPin::new(27);
+    println!("--- работаем с пинами ---");
+    // ... тут мог бы быть код работы с GPIO
+    println!("--- выходим из функции ---");
+    // пины автоматически unexport при выходе
 }
 
-// --- Задача 5: Когда RefCell паникует ---
-// Этот код скомпилируется, но УПАДЁТ в рантайме. Почему?
-// Исправь, чтобы не паниковал.
+// --- Задача 5: Drop и Rc ---
+// Предскажи, когда именно данные будут уничтожены.
+// Подсказка: Rc дропает данные только когда strong_count == 0.
 fn task5() {
-    let data = RefCell::new(vec![1, 2, 3]);
+    let data = Rc::new(Named {
+        name: "shared data".into(),
+    });
+    println!("count: {}", Rc::strong_count(&data));
 
-    let r1 = data.borrow();
-    println!("r1: {:?}", r1);
-    drop(r1);
+    let clone1 = Rc::clone(&data);
+    println!("count: {}", Rc::strong_count(&data));
 
-    let mut r2 = data.borrow_mut(); // паника?
-    r2.push(4);
-    println!("r2: {:?}", r2);
-}
+    {
+        let clone2 = Rc::clone(&data);
+        println!("count: {}", Rc::strong_count(&data));
+        println!("--- inner scope end ---");
+    } // clone2 дропается тут. Дропнутся ли данные? Нет, т.к. кол-во ссылок  еще не равно 0 и кто то пользуется.
+
+    println!("count: {}", Rc::strong_count(&data));
+    drop(clone1);
+    println!("count after drop clone1: {}", Rc::strong_count(&data));
+    println!("--- before final drop ---");
+} // data дропается. strong_count == 0 → Named::drop вызывается
 
 fn main() {
     println!("=== Task 1 ===");
