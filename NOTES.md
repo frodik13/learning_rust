@@ -277,3 +277,71 @@ fn make_transformer(upper: bool) -> Box<dyn Fn(String) -> String> {
 ```
 `impl Fn` = один конкретный анонимный тип. Две ветки if/else — два РАЗНЫХ типа.
 `Box<dyn Fn>` стирает конкретный тип через vtable.
+
+### 3.4 Итераторы
+
+**Трейт Iterator — один обязательный метод:**
+```rust
+trait Iterator {
+    type Item;
+    fn next(&mut self) -> Option<Self::Item>;
+}
+```
+
+**Итераторы ленивые** — пока не вызовешь `.collect()`, `.sum()`, `.for_each()` — ничего не вычисляется.
+
+**Соответствие C# LINQ → Rust:**
+
+| C# LINQ | Rust |
+|---|---|
+| `.Select()` | `.map()` |
+| `.Where()` | `.filter()` |
+| `.Aggregate()` | `.fold()` |
+| `.First()` | `.next()` |
+| `.ToList()` | `.collect::<Vec<_>>()` |
+| `.Any()` | `.any()` |
+| `.Sum()` | `.sum()` |
+
+**Основные адаптеры:**
+```rust
+// map + sum
+numbers.iter().map(|x| x * x).sum()
+
+// enumerate + filter + map + collect
+names.iter()
+    .enumerate()
+    .filter(|(i, _)| i % 2 == 0)
+    .map(|(_, name)| name.to_uppercase())
+    .collect::<Vec<_>>()
+
+// fold — самый мощный, как Aggregate в C#
+words.iter().fold("", |acc, &word| {
+    if word.len() > acc.len() { word } else { acc }
+})
+
+// filter_map — filter + map в одном (удобно для parse)
+input.iter().filter_map(|s| s.parse::<i32>().ok()).sum()
+
+// join через collect + join
+items.iter().collect::<Vec<_>>().join(", ")
+```
+
+**Свой итератор — хранить состояние, не данные:**
+```rust
+struct Countdown { current: Option<u32> }
+
+impl Countdown {
+    fn new(start: u32) -> Self { Self { current: Some(start) } }
+}
+
+impl Iterator for Countdown {
+    type Item = u32;
+    fn next(&mut self) -> Option<u32> {
+        let val = self.current?;           // None → return None
+        self.current = val.checked_sub(1); // 0-1 = None, не паника
+        Some(val)
+    }
+}
+```
+Итератор = O(1) по памяти. Не создавай Vec заранее — вычисляй по запросу.
+Реализовав Iterator, бесплатно получаешь `.map()`, `.filter()`, `.sum()`, `.collect()` и все остальные адаптеры.

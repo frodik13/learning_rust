@@ -1,140 +1,145 @@
-// === ЗАДАНИЕ 3.3: Closures ===
+// === ЗАДАНИЕ 3.4: Итераторы ===
 
-// --- Задача 1: Определи трейт ---
-// Для каждого замыкания определи: Fn, FnMut или FnOnce?
-// Раскомментируй правильный вариант.
-
-fn task1() {
-    let name = String::from("Rust");
-    let numbers = vec![1, 2, 3];
+// --- Задача 1: Базовые адаптеры ---
+// Перепиши каждую функцию с for-цикла на цепочку итераторов.
+// НЕ используй for, while, loop — только методы итераторов.
+fn sum_of_squares_loop(numbers: &[i32]) -> i32 {
     let mut sum = 0;
-
-    // Замыкание A: читает name
-    let a = || println!("{}", name);
-    // a реализует: Fn
-
-    // Замыкание B: меняет sum
-    let mut b = || {
-        sum += 1;
-    };
-    // b реализует FnMut
-
-    // Замыкание C: забирает numbers
-    let c = || {
-        drop(numbers);
-    };
-    // c реализует FnOnce
-
-    a();
-    a();
-    b();
-    b();
-    c();
-    // c(); // потому что переменная, которую захватило замыкание уже уничтожена.
-
-    println!("sum = {}", sum);
+    for n in numbers {
+        sum += n * n;
+    }
+    sum
 }
 
-// --- Задача 2: Closure как параметр ---
-// Допиши функцию `apply_twice`: принимает значение и замыкание,
-// применяет замыкание два раза.
-// Какой trait bound нужен: Fn, FnMut, или FnOnce? Почему?
-fn apply_twice<T, F>(mut value: T, f: F) -> T
-where
-    F: Fn(T) -> T, // исправь trait если нужно
-{
-    value = f(value);
-    value = f(value);
-    value
+// Перепиши через .map().sum()
+fn sum_of_squares(numbers: &[i32]) -> i32 {
+    numbers.iter().map(|x| x * x).sum()
 }
 
-fn task2() {
-    let result = apply_twice(1, |x| x * 2);
-    println!("apply_twice(1, *2) = {}", result); // 4
-
-    let result = apply_twice(String::from("ha"), |s| s + "ha");
-    println!("apply_twice(ha, +ha) = {}", result); // hahaha
-}
-
-// --- Задача 3: move closure ---
-// Эта функция должна вернуть замыкание, которое при вызове возвращает greeting.
-// Без move не скомпилируется — почему? Не знаю почему, объясни.
-// Исправь, добавив move.
-fn make_greeter(name: String) -> impl Fn() -> String {
-    let greeting = format!("Hello, {}!", name);
-    move || greeting.clone()
-}
-
-fn task3() {
-    let greet = make_greeter(String::from("Fedor"));
-    println!("{}", greet());
-    println!("{}", greet()); // должно работать дважды
-}
-
-// --- Задача 4: FnMut в реальности ---
-// Напиши функцию `count_matches`: принимает слайс &[T] и предикат (замыкание),
-// возвращает количество элементов, для которых предикат вернул true.
-// Какой bound на замыкание? Подумай: предикат только читает элемент.
-
-fn count_matches<T, F>(numbers: &[T], f: F) -> i32
-where
-    F: Fn(&T) -> bool,
-{
-    let mut count = 0;
-
-    for num in numbers {
-        if f(num) {
-            count += 1;
+fn even_names_loop(names: &[&str]) -> Vec<String> {
+    let mut result = Vec::new();
+    for (i, name) in names.iter().enumerate() {
+        if i % 2 == 0 {
+            result.push(name.to_uppercase());
         }
     }
-
-    count
+    result
 }
 
-fn task4() {
-    let numbers = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-
-    let evens = count_matches(&numbers, |x| x % 2 == 0);
-    println!("evens: {}", evens); // 5
-
-    let big = count_matches(&numbers, |x| *x > 5);
-    println!("big: {}", big); // 5
-
-    // С замыканием, которое захватывает переменную
-    let threshold = 7;
-    let above = count_matches(&numbers, |x| *x > threshold);
-    println!("above {}: {}", threshold, above); // 3
+// Перепиши через .enumerate().filter().map().collect()
+fn even_names(names: &[&str]) -> Vec<String> {
+    names
+        .iter()
+        .enumerate()
+        .filter(|name| name.0 % 2 == 0)
+        .map(|name| name.1.to_uppercase())
+        .collect()
 }
 
-// --- Задача 5: Возврат разных замыканий ---
-// Эта функция возвращает замыкание-трансформер.
-// Если uppercase == true, возвращает замыкание, переводящее строку в верхний регистр.
-// Иначе — в нижний.
-// Почему тут нужен Box<dyn Fn>? Почему нельзя impl Fn? Потому что у замыкания может быть разный размер, поэтому нужен Box
-fn make_transformer(uppercase: bool) -> Box<dyn Fn(String) -> String> {
-    if uppercase {
-        Box::new(|x: String| x.to_uppercase())
-    } else {
-        Box::new(|x: String| x.to_lowercase())
+// --- Задача 2: fold —  самый мощный адаптер ---
+// fold = Aggregate в C#. Из него можно выразить почти всё.
+// Найди самую длинную строку в слайсе через .fold()
+// Если слайс пустой — верни ""
+fn longest_word<'a>(words: &[&'a str]) -> &'a str {
+    words.iter().fold(
+        "",
+        |acc, &word| {
+            if word.len() > acc.len() { word } else { acc }
+        },
+    )
+}
+
+// --- Задача 3: Свой итератор ---
+// Создай структуру `Countdown` которая считает от n до 0 (включительно).
+// Реализуй для неё trait Iterator с Item = u32.
+//
+// let c = Countdown::new(3);
+// c.next() → Some(3)
+// c.next() → Some(2)
+// c.next() → Some(1)
+// c.next() → Some(0)
+// c.next() → None
+
+struct Countdown {
+    // твои поля
+    current: Option<u32>
+}
+
+impl Countdown {
+    pub fn new(start: u32) -> Self {
+        Self { current: Some(start) }
     }
 }
 
-fn task5() {
-    let upper = make_transformer(true);
-    let lower = make_transformer(false);
-    println!("{}", upper(String::from("hello"))); // HELLO
-    println!("{}", lower(String::from("WORLD"))); // world
+impl Iterator for Countdown {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let val = self.current?;
+        self.current = val.checked_sub(1);
+        Some(val)
+    }
+}
+
+// --- Задача 4: Цепочки итераторов ---
+// Дан вектор строк. Нужно:
+// 1. Отфильтровать пустые строки
+// 2. Обрезать пробелы по краям (trim)
+// 3. Преобразовать в UPPERCASE
+// 4. Собрать в одну строку через ", "
+// Всё — одной цепочкой.
+fn clean_and_join(input: &[&str]) -> String {
+    input
+        .iter()
+        .map(|x| x.trim().to_uppercase())
+        .filter(|x| !x.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+// --- Задача 5: Iterator + Option ---
+// Дан слайс строк, каждая может быть числом или нет.
+// Спарси только валидные числа и верни их сумму.
+// Подсказка: .filter_map() — это .filter() + .map() в одном.
+// str::parse::<i32>() возвращает Result, а .ok() превращает его в Option.
+fn sum_valid_numbers(input: &[&str]) -> i32 {
+    input
+        .iter()
+        .filter_map(|s| s.parse::<i32>().ok())
+        .sum()
 }
 
 fn main() {
-    println!("=== Task 1 ===");
-    task1();
-    println!("\n=== Task 2 ===");
-    task2();
-    println!("\n=== Task 3 ===");
-    task3();
-    println!("\n=== Task 4 ===");
-    task4();
-    println!("\n=== Task 5 ===");
-    task5();
+    // Задача 1
+    let nums = vec![1, 2, 3, 4, 5];
+    println!("sum of squares (loop): {}", sum_of_squares_loop(&nums));
+    println!("sum of squares (iter): {}", sum_of_squares(&nums)); // 55
+
+    let names = vec!["Alice", "Bob", "Charlie", "Dave", "Eve"];
+    println!("even names (loop): {:?}", even_names_loop(&names));
+    println!("even names (iter): {:?}", even_names(&names)); // ["ALICE", "CHARLIE", "EVE"]
+
+    // Задача 2
+    let words = vec!["hi", "hello", "hey", "greetings"];
+    println!("longest: {}", longest_word(&words)); // greetings
+
+    let words = vec![];
+    println!("longest: {}", longest_word(&words));
+
+    // Задача 3
+    let countdown = Countdown::new(5);
+    let nums: Vec<u32> = countdown.collect();
+    println!("countdown: {:?}", nums); // [5, 4, 3, 2, 1, 0]
+
+    // Бонус: раз Countdown — итератор, все адаптеры работают бесплатно:
+    let sum: u32 = Countdown::new(10).sum();
+    println!("sum 0..=10: {}", sum); // 55
+
+    // Задача 4
+    let messy = vec!["  hello ", "", " world  ", "  ", "  rust "];
+    println!("cleaned: {}", clean_and_join(&messy)); // "HELLO, WORLD, RUST"
+
+    // Задача 5
+    let mixed = vec!["42", "abc", "7", "", "13", "xyz", "0"];
+    println!("sum of valid: {}", sum_valid_numbers(&mixed)); // 62
 }
