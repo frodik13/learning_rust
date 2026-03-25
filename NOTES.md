@@ -552,3 +552,51 @@ impl Drop for GpioPin {
 
 Невозможно забыть освободить ресурс — компилятор вставляет drop() автоматически.
 В C# нужен `using`/`Dispose()`, в Rust — бесплатно.
+
+### 4.3 Unsafe Rust
+
+**`unsafe` разблокирует 5 операций:**
+1. Разыменование raw pointer (`*const T`, `*mut T`)
+2. Вызов unsafe функции
+3. Доступ к mutable static
+4. Реализация unsafe trait
+5. Доступ к полям union
+
+**Raw pointers:**
+```rust
+let mut x = 10;
+let ptr: *mut i32 = &mut x;   // создать — safe
+unsafe { *ptr = 5; }           // разыменовать — unsafe
+```
+
+**unsafe fn — вызывающий отвечает за корректность:**
+```rust
+unsafe fn read_bytes(ptr: *const u8, len: usize) -> Vec<u8> {
+    std::slice::from_raw_parts(ptr, len).to_vec()
+}
+```
+
+**unsafe trait — реализующий обещает инвариант:**
+```rust
+unsafe trait Zeroable { fn zeroed() -> Self; }
+unsafe impl Zeroable for u32 { fn zeroed() -> Self { 0 } }
+// НЕ реализуй для String — обнулённый String = UB (dangling ptr)
+```
+
+**transmute — почти всегда есть safe альтернатива:**
+```rust
+// Плохо:  unsafe { std::mem::transmute::<[u8;4], u32>(bytes) }
+// Хорошо: u32::from_le_bytes(bytes)
+```
+
+**UB (Undefined Behavior)** — код, при котором может произойти ЧТО УГОДНО:
+краш, мусорные данные, компилятор удалит код, работает в debug но не в release.
+Safe Rust математически гарантирует отсутствие UB. В unsafe — ты отвечаешь сам.
+
+**Правило: минимизируй unsafe, оборачивай в safe API:**
+```rust
+pub fn read_register(addr: u32) -> u32 {
+    assert!(addr >= 0x2000_0000); // проверка в safe коде
+    unsafe { std::ptr::read_volatile(addr as *const u32) }
+}
+```

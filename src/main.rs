@@ -1,124 +1,160 @@
-// === ЗАДАНИЕ 4.2: Drop trait ===
+// === ЗАДАНИЕ 4.3: Unsafe Rust ===
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::fmt;
 
-// --- Задача 1: Предскажи порядок дропа ---
-// Структура с именем, которая печатает при дропе.
-struct Named {
-    name: String,
-}
-
-impl Drop for Named {
-    fn drop(&mut self) {
-        println!("  drop: {}", self.name);
-    }
-}
-
-// Предскажи порядок вывода, потом запусти и проверь.
+// --- Задача 1: Raw pointers ---
+// Создай две переменные i32. Получи raw pointers на них.
+// Через unsafe прочитай значения и выведи сумму.
+// Потом поменяй значение через *mut pointer.
 fn task1() {
-    println!("--- переменные ---");
-    let _a = Named { name: "A".into() };
-    let _b = Named { name: "B".into() };
-    let _c = Named { name: "C".into() };
-    // В каком порядке дропнутся?
-    // _a, _b, _c.
+    let mut x = 10;
+    let y = 20;
+
+    // Создай raw pointers (это safe)
+    let ptr_x: *mut i32 = &mut x;
+    let ptr_y: *const i32 = &y;
+
+    // Прочитай через unsafe и выведи сумму
+    unsafe { println!("sum = {}", *ptr_x + *ptr_y); }
+
+    // Измени x через ptr_x
+    unsafe { *ptr_x = 5; }
+    println!("x after mutation = {}", x);
 }
 
-// --- Задача 2: drop() vs .drop() ---
-// Раскомментируй поочерёдно и объясни — почему одно работает, а другое нет? Такие усорвия языка.
-fn task2() {
-    let a = Named {
-        name: "explicit".into(),
-    };
-    // a.drop();     // вариант 1
-    drop(a); // вариант 2
-    println!("task2 end");
-}
-
-// --- Задача 3: Drop в структуре ---
-// Предскажи порядок: сначала сама структура или поля? Сначала поля
-struct Wrapper {
-    first: Named,
-    second: Named,
-}
-
-impl Drop for Wrapper {
-    fn drop(&mut self) {
-        println!("  drop: Wrapper itself");
-    }
-}
-
-fn task3() {
-    let _w = Wrapper {
-        first: Named {
-            name: "first field".into(),
-        },
-        second: Named {
-            name: "second field".into(),
-        },
-    };
-}
-
-// --- Задача 4: RAII паттерн ---
-// Создай структуру GpioPin, которая:
-// - При создании (new) печатает "GPIO {pin}: exported"
-// - При дропе печатает "GPIO {pin}: unexported"
-// Это RAII — ресурс захватывается в конструкторе, освобождается в деструкторе.
-// На реальном RPi: new() пишет в /sys/class/gpio/export,
-//                  drop() пишет в /sys/class/gpio/unexport.
+// --- Задача 2: unsafe функция ---
+// Напиши unsafe функцию, которая читает N байт из raw pointer.
+// Это реальный паттерн: драйвер читает из memory-mapped регистра.
+//
+// unsafe fn read_bytes(ptr: *const u8, len: usize) -> Vec<u8>
+//
+// Внутри: создай Vec, скопируй байты из ptr.
+// Подсказка: std::ptr::read() или std::slice::from_raw_parts()
 
 // твой код тут...
-struct GpioPin {
-    pin: u32,
-}
-
-impl GpioPin {
-    fn new(pin: u32) -> Self {
-        println!("GPIO {pin}: exported");
-        Self { pin }
+unsafe fn read_bytes(ptr: *const u8, len: usize) -> Vec<u8> {
+    unsafe {
+        let slice = std::slice::from_raw_parts(ptr, len);   
+        let mut result = Vec::new();
+        result.extend_from_slice(&slice);
+        result
     }
 }
 
-impl Drop for GpioPin {
-    fn drop(&mut self) {
-        println!("GPIO {}: unexported", self.pin);
+fn task2() {
+    let data: [u8; 5] = [0xDE, 0xAD, 0xBE, 0xEF, 0x42];
+    let ptr = data.as_ptr();
+
+    unsafe {
+        let bytes = read_bytes(ptr, 5);
+        println!("bytes: {:02X?}", bytes); // [DE, AD, BE, EF, 42]
+    
+        // Читаем только 3 байта с offset 1
+        let partial = read_bytes(ptr.add(1), 3);
+        println!("partial: {:02X?}", partial); // [AD, BE, EF]
     }
+}
+
+// --- Задача 3: transmute — самая опасная функция ---
+// std::mem::transmute переинтерпретирует биты одного типа как другой.
+// Как reinterpret_cast в C++. Размеры ДОЛЖНЫ совпадать.
+//
+// Задача: преобразуй [u8; 4] в u32 (little-endian) через transmute.
+// Потом сделай то же самое БЕЗОПАСНО через u32::from_le_bytes.
+fn task3() {
+    let bytes: [u8; 4] = [0x78, 0x56, 0x34, 0x12];
+
+    // unsafe способ
+    let value: u32 = unsafe { std::mem::transmute(bytes) };
+    println!("transmute: 0x{:08X}", value);
+
+    // safe способ — ВСЕГДА предпочитай этот
+    let value_safe = u32::from_le_bytes(bytes);
+    println!("from_le_bytes: 0x{:08X}", value_safe);
+}
+
+// --- Задача 4: unsafe trait impl ---
+// Допустим у нас есть trait, который гарантирует что тип
+// безопасно обнулять (все нули — валидное значение).
+// Это unsafe trait — реализующий ОБЕЩАЕТ что это правда.
+// Компилятор не проверяет — ты берёшь ответственность.
+
+unsafe trait Zeroable {
+    fn zeroed() -> Self;
+}
+
+// Реализуй Zeroable для u8, u16, u32.
+// НЕ реализуй для bool (0 = false, но unsafe trait не стоит
+// реализовывать для типов, где это неочевидно).
+// НЕ реализуй для String (обнулённый String = dangling pointer = UB).
+
+// unsafe impl Zeroable for ??? { ... }
+
+// Напиши safe обёртку:
+// fn zero_init<T: Zeroable>() -> T { T::zeroed() }
+unsafe impl Zeroable for u8 {
+    fn zeroed() -> Self {
+        0x00
+    }
+}
+
+unsafe impl Zeroable for u16 {
+    fn zeroed() -> Self {
+        0x00
+    }
+}
+
+unsafe impl Zeroable for u32 {
+    fn zeroed() -> Self {
+        0x00
+    }
+}
+
+fn zero_init<T: Zeroable>() -> T {
+    T::zeroed()
 }
 
 fn task4() {
-    println!("--- создаём пины ---");
-    let _pin1 = GpioPin::new(17);
-    let _pin2 = GpioPin::new(27);
-    println!("--- работаем с пинами ---");
-    // ... тут мог бы быть код работы с GPIO
-    println!("--- выходим из функции ---");
-    // пины автоматически unexport при выходе
+    let x: u32 = zero_init();
+    let y: u8 = zero_init();
+    println!("zeroed u32: {}", x); // 0
+    println!("zeroed u8: {}", y);  // 0
 }
 
-// --- Задача 5: Drop и Rc ---
-// Предскажи, когда именно данные будут уничтожены.
-// Подсказка: Rc дропает данные только когда strong_count == 0.
+// --- Задача 5: Когда НЕ использовать unsafe ---
+// Перепиши этот unsafe код в safe Rust. Unsafe тут не нужен.
+fn find_max_unsafe(data: &[i32]) -> i32 {
+    assert!(!data.is_empty());
+    unsafe {
+        let mut max = *data.get_unchecked(0);
+        let mut i = 1;
+        while i < data.len() {
+            let val = *data.get_unchecked(i);
+            if val > max {
+                max = val;
+            }
+            i += 1;
+        }
+        max
+    }
+}
+
+fn find_max_safe(data: &[i32]) -> i32 {
+    let mut max = data[0];
+    for i in 1..data.len() {
+        if data[i] > max {
+            max = data[i];
+        }
+    }
+
+    max
+}
+
 fn task5() {
-    let data = Rc::new(Named {
-        name: "shared data".into(),
-    });
-    println!("count: {}", Rc::strong_count(&data));
-
-    let clone1 = Rc::clone(&data);
-    println!("count: {}", Rc::strong_count(&data));
-
-    {
-        let clone2 = Rc::clone(&data);
-        println!("count: {}", Rc::strong_count(&data));
-        println!("--- inner scope end ---");
-    } // clone2 дропается тут. Дропнутся ли данные? Нет, т.к. кол-во ссылок  еще не равно 0 и кто то пользуется.
-
-    println!("count: {}", Rc::strong_count(&data));
-    drop(clone1);
-    println!("count after drop clone1: {}", Rc::strong_count(&data));
-    println!("--- before final drop ---");
-} // data дропается. strong_count == 0 → Named::drop вызывается
+    let data = vec![3, 7, 1, 9, 4];
+    println!("unsafe: {}", find_max_unsafe(&data));
+    println!("safe: {}", find_max_safe(&data));
+}
 
 fn main() {
     println!("=== Task 1 ===");
