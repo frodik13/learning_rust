@@ -1,131 +1,213 @@
-// === ЗАДАНИЕ 3.5: Error Handling ===
+// === ЗАДАНИЕ 3.6: Enums как state machines, Newtype ===
 
-use std::fmt;
-use std::num::ParseIntError;
+use std::fmt::{self, Display, format};
 
-// --- Задача 1: Оператор ? ---
-// Напиши функцию, которая парсит строку "ключ=значение" и возвращает (ключ, число).
-// Может упасть на: нет '=', значение не число.
-// Пока используй String как тип ошибки.
-fn parse_key_value(input: &str) -> Result<(String, i32), String> {
-    let (key, val) = input.split_once("=").ok_or("нет '='")?;
-    let num = val.parse::<i32>().map_err(|e| e.to_string())?;
-    Ok((key.to_string(), num))
+// --- Задача 1: Enum с данными ---
+// Создай enum Command для парсера команд на Raspberry Pi:
+//   - ReadGpio { pin: u8 }
+//   - WriteGpio { pin: u8, value: bool }
+//   - SetPwm { pin: u8, duty: f64 }      — duty от 0.0 до 1.0
+//   - Sleep { ms: u64 }
+//   - Shutdown
+//
+// Напиши функцию execute(cmd: &Command) -> String
+// которая через match возвращает описание действия.
+// Для SetPwm проверь что duty в диапазоне [0.0, 1.0], иначе верни ошибку.
+
+// твой код тут...
+enum Command {
+    ReadGpio { pin: u8 },
+    WriteGpio { pin: u8, value: bool },
+    SetPwm { pin: u8, duty: f64 },
+    Sleep { ms: u64 },
+    Shutdown,
+}
+
+fn execute(cmd: &Command) -> String {
+    match cmd {
+        Command::ReadGpio { pin } => format!("Read GPIO pin: {}", pin),
+        Command::WriteGpio { pin, value } => format!(
+            "Write GPIO pin: {}, value: {}",
+            pin,
+            if *value { 1 } else { 0 }
+        ),
+        Command::SetPwm { pin, duty } => {
+            if *duty < 0.0 || *duty > 1.0 {
+                format!("Error duty: {:.2}", duty)
+            } else {
+                format!("Set pwn for pin: {}, duty: {:.2}", pin, duty)
+            }
+        },
+        Command::Sleep { ms } => format!("Sleep {}ms", ms),
+        Command::Shutdown => "Shutdown".to_string(),
+    }
 }
 
 fn task1() {
-    println!("{:?}", parse_key_value("temperature=25")); // Ok(("temperature", 25))
-    println!("{:?}", parse_key_value("broken")); // Err(...)
-    println!("{:?}", parse_key_value("count=abc")); // Err(...)
+    let commands = vec![
+        Command::ReadGpio { pin: 17 },
+        Command::WriteGpio { pin: 27, value: true },
+        Command::SetPwm { pin: 18, duty: 0.75 },
+        Command::Sleep { ms: 1000 },
+        Command::Shutdown,
+    ];
+    for cmd in &commands {
+        println!("{}", execute(cmd));
+    }
 }
 
-// --- Задача 2: Свой тип ошибки ---
-// String как ошибка — плохо: нельзя программно обработать разные случаи.
-// Создай enum ConfigError с вариантами:
-//   - MissingEquals         — нет символа '='
-//   - InvalidValue(ParseIntError) — значение не парсится в число
+// --- Задача 2: State machine ---
+// Смоделируй LED, который может быть в трёх состояниях:
+//   - Off
+//   - On { brightness: u8 }        — 1..=255
+//   - Blinking { interval_ms: u64 } — мигает с интервалом
 //
-// Реализуй Display и std::error::Error для ConfigError.
-// Перепиши parse_key_value_v2 используя ConfigError.
+// Реализуй методы через impl на enum:
+//   - fn turn_on(self, brightness: u8) -> LedState
+//   - fn turn_off(self) -> LedState
+//   - fn blink(self, interval_ms: u64) -> LedState
+//
+// Важно: self, не &self — метод ПОТРЕБЛЯЕТ старое состояние и возвращает новое.
+// Это гарантирует, что нельзя использовать старое состояние после перехода.
 
-#[derive(Debug)]
-enum ConfigError {
-    MissingEquals,
-    InvalidValue(ParseIntError),
+// твой код тут...
+enum LedState {
+    Off,
+    On { brightness: u8},
+    Blinking {interval_ms: u64},
 }
 
-impl fmt::Display for ConfigError {
+impl LedState {
+    fn turn_on(self, brightness: u8) -> LedState {
+        LedState::On { brightness }
+    }
+
+    fn turn_off(self) -> LedState {
+        LedState::Off
+    }
+
+    fn blink(self, interval_ms: u64) -> LedState {
+        LedState::Blinking { interval_ms }
+    }
+}
+
+impl Display for LedState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ConfigError::MissingEquals => write!(f, "нет символа '='"),
-            ConfigError::InvalidValue(_) => write!(f, "значение не парсится в число"),
+            LedState::Off => write!(f, "Off"),
+            LedState::On { brightness } => write!(f, "On({})", brightness),
+            LedState::Blinking { interval_ms } => write!(f, "Blinking({}ms)", interval_ms),
         }
-    }
-}
-impl std::error::Error for ConfigError {}
-
-// Подсказка: impl From<ParseIntError> for ConfigError позволит использовать ? напрямую.
-impl From<ParseIntError> for ConfigError {
-    fn from(value: ParseIntError) -> Self {
-        ConfigError::InvalidValue(value)
-    }
-}
-
-fn parse_key_value_v2(input: &str) -> Result<(String, i32), ConfigError> {
-    let split: Vec<&str> = input.split('=').collect();
-    if split.len() != 2 {
-        Err(ConfigError::MissingEquals)
-    } else {
-        let int = split[1].parse::<i32>()?;
-
-        Ok((split[0].to_string(), int))
     }
 }
 
 fn task2() {
-    println!("{:?}", parse_key_value_v2("temperature=25")); // Ok(...)
-    println!("error: {}", parse_key_value_v2("broken").unwrap_err());
-    println!("error: {}", parse_key_value_v2("count=abc").unwrap_err());
+    let led = LedState::Off;
+    println!("{}", led);           // Off
+    let led = led.turn_on(128);
+    println!("{}", led);           // On(128)
+    let led = led.blink(500);
+    println!("{}", led);           // Blinking(500ms)
+    let led = led.turn_off();
+    println!("{}", led);           // Off
 }
 
-// --- Задача 3: Пробрасывание через ? ---
-// Функция читает "конфиг" (вектор строк "ключ=значение")
-// и возвращает сумму всех значений.
-// Если хоть одна строка невалидна — возвращает ошибку.
-// Используй parse_key_value_v2 и оператор ?.
+// --- Задача 3: Newtype pattern ---
+// На RPi ты работаешь с GPIO пинами и I2C адресами.
+// Оба — просто числа, легко перепутать.
+// Создай newtype обёртки:
+//   - GpioPin(u8)
+//   - I2cAddress(u8)
+//
+// Реализуй Display для обоих.
+// Напиши функции:
+//   - fn read_gpio(pin: GpioPin) -> bool
+//   - fn read_i2c(addr: I2cAddress) -> u8
+//
+// Убедись, что нельзя передать GpioPin вместо I2cAddress.
 
-fn sum_config_values(lines: &[&str]) -> Result<i32, ConfigError> {
-    let mut sum = 0;
-    for line in lines {
-        let parse = parse_key_value_v2(line)?;
-        sum += parse.1;
+// твой код тут...
+struct GpioPin(u8);
+struct I2cAddress(u8);
+
+impl Display for GpioPin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Gpio pin: {}", self.0)
     }
+}
 
-    Ok(sum)
+impl Display for I2cAddress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "I2cAddress: {}", self.0)
+    }
+}
+
+fn read_gpio(pin: &GpioPin) -> bool {
+    pin.0 > 0 && pin.0 <= 36
+}
+
+fn read_i2c(addr: &I2cAddress) -> u8 {
+    addr.0
 }
 
 fn task3() {
-    let valid = vec!["a=1", "b=2", "c=3"];
-    println!("sum: {:?}", sum_config_values(&valid)); // Ok(6)
-
-    let invalid = vec!["a=1", "broken", "c=3"];
-    println!("sum: {:?}", sum_config_values(&invalid)); // Err(MissingEquals)
+    let pin = GpioPin(17);
+    let addr = I2cAddress(0x48);
+    
+    println!("GPIO {}: {}", pin, read_gpio(&pin));
+    println!("I2C {}: 0x{:02X}", addr, read_i2c(&addr));
+    //
+    // // Это НЕ должно компилироваться (раскомментируй для проверки):
+    // read_gpio(addr);   // ошибка типов!
+    // read_i2c(pin);     // ошибка типов!
 }
 
-// --- Задача 4: Разная обработка разных ошибок ---
-// Напиши функцию, которая вызывает parse_key_value_v2 и обрабатывает ошибки:
-// - MissingEquals → подставляет значение по умолчанию 0
-// - InvalidValue → пробрасывает ошибку дальше
-// Используй match на Result.
+// --- Задача 4: Enum + newtype + Result ---
+// Объедини всё вместе. Создай:
+//   - enum SensorReading — Temperature(f64), Humidity(f64), Pressure(f64)
+//   - struct SensorId(u8) — newtype для ID датчика
+//   - fn read_sensor(id: SensorId) -> Result<SensorReading, String>
+//     (для id.0 == 1 верни Temperature, для 2 — Humidity, для 3 — Pressure,
+//      иначе — Err)
+//
+// Реализуй Display для SensorReading — выводи значение с единицей измерения.
 
-fn parse_or_default(input: &str) -> Result<(String, i32), ConfigError> {
-    match parse_key_value_v2(input) {
-        Ok(r) => Ok(r),
-        Err(ConfigError::MissingEquals) => Ok((input.to_string(), 0)),
-        Err(e) => Err(e),
+// твой код тут...
+enum SensorReading {
+    Temperature(f64),
+    Humidity(f64),
+    Pressure(f64),
+}
+
+struct SensorId(u8);
+
+impl Display for SensorReading {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SensorReading::Temperature(temp) => write!(f, "Temperature: {temp:.1} °C"),
+            SensorReading::Humidity(humidity) => write!(f, "Humidity: {humidity:.1} %"),
+            SensorReading::Pressure(pressure) => write!(f, "Pressure: {pressure:.1} mm Hg"),
+        }
+    }
+}
+
+fn read_sensor(sensor: SensorId) -> Result<SensorReading, String> {
+    match sensor.0 {
+        1 => Ok(SensorReading::Temperature(24.4)),
+        2 => Ok(SensorReading::Humidity(64.2)),
+        3 => Ok(SensorReading::Pressure(733.3)),
+        _ => Err("ошибка чтения датчика".to_string()),
     }
 }
 
 fn task4() {
-    println!("{:?}", parse_or_default("temp=25")); // Ok(("temp", 25))
-    println!("{:?}", parse_or_default("flag")); // Ok(("flag", 0))
-    println!("{:?}", parse_or_default("bad=xyz")); // Err(InvalidValue(...))
-}
-
-// --- Задача 5: Collect Result ---
-// Фишка Rust: .collect() может собирать Vec<Result<T,E>> в Result<Vec<T>, E>.
-// Первая ошибка останавливает сбор.
-// Спарси все строки в числа, вернув либо Vec<i32> либо первую ошибку.
-fn parse_all(input: &[&str]) -> Result<Vec<i32>, ParseIntError> {
-    input
-        .iter()
-        .map(|x| x.parse::<i32>())
-        .collect()
-}
-
-fn task5() {
-    println!("{:?}", parse_all(&["1", "2", "3"]));       // Ok([1, 2, 3])
-    println!("{:?}", parse_all(&["1", "abc", "3"]));     // Err(...)
+    for id in 1..=4 {
+        let sensor = SensorId(id);
+        match read_sensor(sensor) {
+            Ok(reading) => println!("Sensor {}: {}", id, reading),
+            Err(e) => println!("Sensor {}: ERROR - {}", id, e),
+        }
+    }
 }
 
 fn main() {
@@ -137,6 +219,4 @@ fn main() {
     task3();
     println!("\n=== Task 4 ===");
     task4();
-    println!("\n=== Task 5 ===");
-    task5();
 }

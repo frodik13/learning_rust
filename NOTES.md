@@ -396,3 +396,43 @@ match parse_key_value_v2(input) {
 // Vec<Result<T,E>> → Result<Vec<T>, E>. Первая ошибка останавливает сбор.
 input.iter().map(|x| x.parse::<i32>()).collect::<Result<Vec<_>, _>>()
 ```
+
+### 3.6 Enums как state machines, Newtype pattern
+
+**Enum в Rust — алгебраический тип (каждый вариант хранит свои данные):**
+```rust
+enum Command {
+    ReadGpio { pin: u8 },
+    WriteGpio { pin: u8, value: bool },
+    SetPwm { pin: u8, duty: f64 },
+    Shutdown,
+}
+```
+В C# enum — просто числа. В Rust — полноценные tagged unions.
+
+**State machine через enum — невалидные состояния невозможны:**
+```rust
+enum LedState {
+    Off,
+    On { brightness: u8 },
+    Blinking { interval_ms: u64 },
+}
+
+impl LedState {
+    fn turn_on(self, brightness: u8) -> LedState {  // self, не &self!
+        LedState::On { brightness }
+    }
+}
+```
+`self` (не `&self`) потребляет старое состояние. После `led.turn_on(128)` старый `led` недоступен — компилятор гарантирует корректность переходов.
+
+**Newtype — type safety через обёртку:**
+```rust
+struct GpioPin(u8);
+struct I2cAddress(u8);
+
+fn read_gpio(pin: &GpioPin) -> bool { ... }
+fn read_i2c(addr: &I2cAddress) -> u8 { ... }
+// read_gpio(addr) — ошибка компиляции! Нельзя перепутать.
+```
+Zero-cost: в рантайме newtype — тот же u8, обёртка стирается компилятором.

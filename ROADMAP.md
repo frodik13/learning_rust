@@ -16,7 +16,7 @@
 - [x] **3.3** Closures: Fn/FnMut/FnOnce, захват переменных, move closures
 - [x] **3.4** Итераторы: ленивость, свой итератор, zero-cost абстракция
 - [x] **3.5** Error handling: thiserror, From конверсии, error propagation паттерны
-- [ ] **3.6** Enums как state machines, newtype pattern, type-level programming
+- [x] **3.6** Enums как state machines, newtype pattern, type-level programming
 
 ## Фаза 4: Память и unsafe
 - [ ] **4.1** Smart pointers: Box, Rc, Arc, RefCell, interior mutability
