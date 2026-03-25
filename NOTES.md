@@ -436,3 +436,88 @@ fn read_i2c(addr: &I2cAddress) -> u8 { ... }
 // read_gpio(addr) — ошибка компиляции! Нельзя перепутать.
 ```
 Zero-cost: в рантайме newtype — тот же u8, обёртка стирается компилятором.
+
+---
+
+## Фаза 4: Память и unsafe
+
+### 4.1 Smart Pointers
+
+**Таблица smart pointers:**
+
+| Тип | Зачем | Аналог в C# |
+|---|---|---|
+| `Box<T>` | Данные на куче, один владелец | обычный `new` |
+| `Rc<T>` | Несколько владельцев (single-thread) | нет (GC делает это) |
+| `Arc<T>` | Как Rc, но потокобезопасный | нет |
+| `RefCell<T>` | Мутабельность в рантайме | нет |
+| `Rc<RefCell<T>>` | Несколько владельцев + мутабельность | обычный C# объект |
+
+#### Box<T> — подробный разбор
+
+**Что в памяти:**
+```
+Стек                    Куча
+┌──────────┐           ┌──────────────┐
+│ Box<T>   │           │              │
+│ ptr ─────────────────→  данные T    │
+│ (8 байт) │           │              │
+└──────────┘           └──────────────┘
+```
+
+**Зачем нужен:**
+- Рекурсивные типы (Tree, List) — без Box размер бесконечный
+- Большие данные — `Box::new([0u8; 4096])` вместо стека
+- `dyn Trait` — owned trait objects
+- Передача владения без копирования — 8 байт указателя вместо мегабайта данных
+
+**Box реализует Deref → auto-deref работает как обычный T:**
+```rust
+let s = Box::new(String::from("hello"));
+println!("{}", s.len()); // auto-deref → String::len()
+```
+
+**Box<dyn Trait> = fat pointer (16 байт на стеке):**
+```
+ptr → данные в куче    (8 байт)
+ptr → vtable           (8 байт)
+```
+
+**Box владеет данными, move-семантика:**
+```rust
+let a = Box::new(5);
+let b = a;         // move, a невалидна
+```
+
+**Когда Box уходит из скоупа — drop вызывается для данных на куче.**
+
+#### Rc<T> — reference counting
+
+```rust
+let config = Rc::new(Config { ... });
+let gpio = Rc::clone(&config);   // strong_count = 2
+let logger = Rc::clone(&config); // strong_count = 3
+drop(gpio);                      // strong_count = 2
+// Когда count = 0 → данные освобождаются
+```
+`Rc::clone` — дешёвая операция, инкремент счётчика, НЕ клонирование данных.
+
+#### RefCell<T> — interior mutability
+
+Borrow checker в рантайме. Нарушение правил = паника (не ошибка компиляции).
+```rust
+let cell = RefCell::new(vec![1, 2, 3]);
+let r1 = cell.borrow();       // shared borrow
+drop(r1);                     // ОБЯЗАТЕЛЬНО отпустить перед borrow_mut
+let mut r2 = cell.borrow_mut(); // exclusive borrow — ок, r1 уже дропнут
+```
+
+#### Rc<RefCell<T>> — shared mutable state (single-thread)
+
+```rust
+type SharedLog = Rc<RefCell<Vec<String>>>;
+
+fn log_message(log: &SharedLog, msg: &str) {
+    log.borrow_mut().push(msg.to_string());
+}
+```

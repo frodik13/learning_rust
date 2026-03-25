@@ -1,213 +1,223 @@
-// === ЗАДАНИЕ 3.6: Enums как state machines, Newtype ===
+// === ЗАДАНИЕ 4.1: Smart Pointers ===
 
-use std::fmt::{self, Display, format};
+use std::arch::naked_asm;
+use std::cell::RefCell;
+use std::collections::VecDeque;
+use std::fmt;
+use std::rc::Rc;
 
-// --- Задача 1: Enum с данными ---
-// Создай enum Command для парсера команд на Raspberry Pi:
-//   - ReadGpio { pin: u8 }
-//   - WriteGpio { pin: u8, value: bool }
-//   - SetPwm { pin: u8, duty: f64 }      — duty от 0.0 до 1.0
-//   - Sleep { ms: u64 }
-//   - Shutdown
-//
-// Напиши функцию execute(cmd: &Command) -> String
-// которая через match возвращает описание действия.
-// Для SetPwm проверь что duty в диапазоне [0.0, 1.0], иначе верни ошибку.
+// --- Задача 1: Box и рекурсивные типы ---
+// Создай бинарное дерево:
+//   enum Tree<T> {
+//       Leaf(T),
+//       Node { left: ???, right: ??? },
+//   }
+// Без Box не скомпилируется — почему?
+// Реализуй метод fn sum(&self) -> i32 для Tree<i32> (сумма всех значений).
 
 // твой код тут...
-enum Command {
-    ReadGpio { pin: u8 },
-    WriteGpio { pin: u8, value: bool },
-    SetPwm { pin: u8, duty: f64 },
-    Sleep { ms: u64 },
-    Shutdown,
+enum Tree<T> {
+    Leaf(T),
+    Node {
+        left: Box<Tree<T>>,
+        right: Box<Tree<T>>,
+    },
 }
 
-fn execute(cmd: &Command) -> String {
-    match cmd {
-        Command::ReadGpio { pin } => format!("Read GPIO pin: {}", pin),
-        Command::WriteGpio { pin, value } => format!(
-            "Write GPIO pin: {}, value: {}",
-            pin,
-            if *value { 1 } else { 0 }
-        ),
-        Command::SetPwm { pin, duty } => {
-            if *duty < 0.0 || *duty > 1.0 {
-                format!("Error duty: {:.2}", duty)
-            } else {
-                format!("Set pwn for pin: {}, duty: {:.2}", pin, duty)
+impl Tree<i32> {
+    fn sum(&self) -> i32 {
+        let mut sum = 0;
+
+        let mut queue: VecDeque<&Tree<i32>> = VecDeque::new();
+        queue.push_back(self);
+        while !queue.is_empty() {
+            let node = queue.pop_back();
+            match node {
+                Some(n) => match n {
+                    Tree::Leaf(value) => sum += value,
+                    Tree::Node { left, right } => {
+                        queue.push_back(left);
+                        queue.push_back(right);
+                    }
+                },
+                None => continue,
             }
-        },
-        Command::Sleep { ms } => format!("Sleep {}ms", ms),
-        Command::Shutdown => "Shutdown".to_string(),
+        }
+
+        sum
     }
 }
 
 fn task1() {
-    let commands = vec![
-        Command::ReadGpio { pin: 17 },
-        Command::WriteGpio { pin: 27, value: true },
-        Command::SetPwm { pin: 18, duty: 0.75 },
-        Command::Sleep { ms: 1000 },
-        Command::Shutdown,
-    ];
-    for cmd in &commands {
-        println!("{}", execute(cmd));
-    }
+    let tree = Tree::Node {
+        left: Box::new(Tree::Node {
+            left: Box::new(Tree::Leaf(1)),
+            right: Box::new(Tree::Leaf(2)),
+        }),
+        right: Box::new(Tree::Leaf(3)),
+    };
+    println!("sum = {}", tree.sum()); // 6
 }
 
-// --- Задача 2: State machine ---
-// Смоделируй LED, который может быть в трёх состояниях:
-//   - Off
-//   - On { brightness: u8 }        — 1..=255
-//   - Blinking { interval_ms: u64 } — мигает с интервалом
+// --- Задача 2: Rc — несколько владельцев ---
+// Сценарий: на RPi несколько задач читают из одного конфига.
+// Config нельзя клонировать (дорого), но несколько частей кода
+// должны иметь доступ к нему.
 //
-// Реализуй методы через impl на enum:
-//   - fn turn_on(self, brightness: u8) -> LedState
-//   - fn turn_off(self) -> LedState
-//   - fn blink(self, interval_ms: u64) -> LedState
+// struct Config { device_name: String, pin_count: u8 }
+// struct GpioManager { config: ??? }
+// struct Logger { config: ??? }
 //
-// Важно: self, не &self — метод ПОТРЕБЛЯЕТ старое состояние и возвращает новое.
-// Это гарантирует, что нельзя использовать старое состояние после перехода.
+// Создай один Config, оберни в Rc, передай в оба.
+// Убедись что оба читают одни и те же данные.
+// Выведи Rc::strong_count на каждом шаге.
 
 // твой код тут...
-enum LedState {
-    Off,
-    On { brightness: u8},
-    Blinking {interval_ms: u64},
+struct Config {
+    device_name: String,
+    pin_count: u8,
 }
 
-impl LedState {
-    fn turn_on(self, brightness: u8) -> LedState {
-        LedState::On { brightness }
-    }
-
-    fn turn_off(self) -> LedState {
-        LedState::Off
-    }
-
-    fn blink(self, interval_ms: u64) -> LedState {
-        LedState::Blinking { interval_ms }
-    }
+struct GpioManager {
+    config: Rc<Config>,
 }
 
-impl Display for LedState {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            LedState::Off => write!(f, "Off"),
-            LedState::On { brightness } => write!(f, "On({})", brightness),
-            LedState::Blinking { interval_ms } => write!(f, "Blinking({}ms)", interval_ms),
-        }
-    }
+struct Logger {
+    config: Rc<Config>,
 }
 
 fn task2() {
-    let led = LedState::Off;
-    println!("{}", led);           // Off
-    let led = led.turn_on(128);
-    println!("{}", led);           // On(128)
-    let led = led.blink(500);
-    println!("{}", led);           // Blinking(500ms)
-    let led = led.turn_off();
-    println!("{}", led);           // Off
+    let config = Rc::new(Config {
+        device_name: "RPi4".to_string(),
+        pin_count: 40,
+    });
+    println!("count after create: {}", Rc::strong_count(&config));
+
+    let gpio = GpioManager {
+        config: Rc::clone(&config),
+    };
+    println!("count after gpio: {}", Rc::strong_count(&config));
+
+    let logger = Logger {
+        config: Rc::clone(&config),
+    };
+    println!("count after logger: {}", Rc::strong_count(&config));
+
+    println!(
+        "gpio sees: {} ({} pins)",
+        gpio.config.device_name, gpio.config.pin_count
+    );
+    println!(
+        "logger sees: {} ({} pins)",
+        logger.config.device_name, logger.config.pin_count
+    );
+
+    drop(gpio);
+    println!("count after drop gpio: {}", Rc::strong_count(&config));
 }
 
-// --- Задача 3: Newtype pattern ---
-// На RPi ты работаешь с GPIO пинами и I2C адресами.
-// Оба — просто числа, легко перепутать.
-// Создай newtype обёртки:
-//   - GpioPin(u8)
-//   - I2cAddress(u8)
+// --- Задача 3: RefCell — interior mutability ---
+// Сценарий: несколько модулей пишут в общий лог.
+// Лог должен быть мутабельным, но Rc не даёт &mut.
+// Решение: Rc<RefCell<Vec<String>>>
 //
-// Реализуй Display для обоих.
-// Напиши функции:
-//   - fn read_gpio(pin: GpioPin) -> bool
-//   - fn read_i2c(addr: I2cAddress) -> u8
-//
-// Убедись, что нельзя передать GpioPin вместо I2cAddress.
+// Создай SharedLog = Rc<RefCell<Vec<String>>>
+// Напиши функцию fn log_message(log: &SharedLog, msg: &str)
+// Напиши функцию fn print_log(log: &SharedLog)
 
-// твой код тут...
-struct GpioPin(u8);
-struct I2cAddress(u8);
+type SharedLog = Rc<RefCell<Vec<String>>>;
 
-impl Display for GpioPin {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Gpio pin: {}", self.0)
-    }
+fn log_message(log: &SharedLog, msg: &str) {
+    log.borrow_mut().push(msg.to_string());
 }
 
-impl Display for I2cAddress {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "I2cAddress: {}", self.0)
-    }
-}
-
-fn read_gpio(pin: &GpioPin) -> bool {
-    pin.0 > 0 && pin.0 <= 36
-}
-
-fn read_i2c(addr: &I2cAddress) -> u8 {
-    addr.0
+fn print_log(log: &SharedLog) {
+    let l = log.borrow();
+    l.iter().for_each(|x| println!("{x}"));
 }
 
 fn task3() {
-    let pin = GpioPin(17);
-    let addr = I2cAddress(0x48);
-    
-    println!("GPIO {}: {}", pin, read_gpio(&pin));
-    println!("I2C {}: 0x{:02X}", addr, read_i2c(&addr));
-    //
-    // // Это НЕ должно компилироваться (раскомментируй для проверки):
-    // read_gpio(addr);   // ошибка типов!
-    // read_i2c(pin);     // ошибка типов!
+    let log = Rc::new(RefCell::new(Vec::new()));
+
+    log_message(&log, "System started");
+    log_message(&log, "GPIO initialized");
+
+    let log2 = Rc::clone(&log);
+    log_message(&log2, "Sensor reading: 25.5°C");
+
+    print_log(&log); // все 3 сообщения
+    println!("log refs: {}", Rc::strong_count(&log));
 }
 
-// --- Задача 4: Enum + newtype + Result ---
-// Объедини всё вместе. Создай:
-//   - enum SensorReading — Temperature(f64), Humidity(f64), Pressure(f64)
-//   - struct SensorId(u8) — newtype для ID датчика
-//   - fn read_sensor(id: SensorId) -> Result<SensorReading, String>
-//     (для id.0 == 1 верни Temperature, для 2 — Humidity, для 3 — Pressure,
-//      иначе — Err)
+// --- Задача 4: Box<dyn Trait> — owned trait objects ---
+// Создай trait Device с методом fn status(&self) -> String
+// Создай два типа: Led { pin: u8, on: bool } и Buzzer { pin: u8, freq: u32 }
+// Реализуй Device для обоих.
 //
-// Реализуй Display для SensorReading — выводи значение с единицей измерения.
+// Создай функцию fn create_devices() -> Vec<Box<dyn Device>>
+// которая возвращает вектор разных устройств.
+// Почему тут Box, а не &dyn? Потому что устройства создаются внутри функции
+// и должны ЖИТЬ после возврата. Ссылка на локальную переменную — dangling.
 
 // твой код тут...
-enum SensorReading {
-    Temperature(f64),
-    Humidity(f64),
-    Pressure(f64),
+trait Device {
+    fn status(&self) -> String;
 }
 
-struct SensorId(u8);
+struct Led {
+    pin: u8,
+    on: bool,
+}
 
-impl Display for SensorReading {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SensorReading::Temperature(temp) => write!(f, "Temperature: {temp:.1} °C"),
-            SensorReading::Humidity(humidity) => write!(f, "Humidity: {humidity:.1} %"),
-            SensorReading::Pressure(pressure) => write!(f, "Pressure: {pressure:.1} mm Hg"),
-        }
+struct Buzzer {
+    pin: u8,
+    freq: u32,
+}
+
+impl Device for Led {
+    fn status(&self) -> String {
+        format!("Led pin: {} status {}", self.pin, self.on)
     }
 }
 
-fn read_sensor(sensor: SensorId) -> Result<SensorReading, String> {
-    match sensor.0 {
-        1 => Ok(SensorReading::Temperature(24.4)),
-        2 => Ok(SensorReading::Humidity(64.2)),
-        3 => Ok(SensorReading::Pressure(733.3)),
-        _ => Err("ошибка чтения датчика".to_string()),
+impl Device for Buzzer {
+    fn status(&self) -> String {
+        format!("Buzzer pin: {}, freq: {}", self.pin, self.freq)
     }
+}
+
+fn create_devices() -> Vec<Box<dyn Device>> {
+    let mut result: Vec<Box<dyn Device>> = Vec::new();
+
+    let led = Box::new(Led { pin: 8, on: false });
+    let buzzer = Box::new(Buzzer { pin: 13, freq: 33 });
+
+    result.push(led);
+    result.push(buzzer);
+
+    result
 }
 
 fn task4() {
-    for id in 1..=4 {
-        let sensor = SensorId(id);
-        match read_sensor(sensor) {
-            Ok(reading) => println!("Sensor {}: {}", id, reading),
-            Err(e) => println!("Sensor {}: ERROR - {}", id, e),
-        }
+    let devices = create_devices();
+    for dev in &devices {
+        println!("{}", dev.status());
     }
+}
+
+// --- Задача 5: Когда RefCell паникует ---
+// Этот код скомпилируется, но УПАДЁТ в рантайме. Почему?
+// Исправь, чтобы не паниковал.
+fn task5() {
+    let data = RefCell::new(vec![1, 2, 3]);
+
+    let r1 = data.borrow();
+    println!("r1: {:?}", r1);
+    drop(r1);
+
+    let mut r2 = data.borrow_mut(); // паника?
+    r2.push(4);
+    println!("r2: {:?}", r2);
 }
 
 fn main() {
@@ -219,4 +229,6 @@ fn main() {
     task3();
     println!("\n=== Task 4 ===");
     task4();
+    println!("\n=== Task 5 ===");
+    task5();
 }
