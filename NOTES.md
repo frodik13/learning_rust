@@ -660,3 +660,42 @@ unsafe extern "C" fn compare_ints(a: *const c_void, b: *const c_void) -> c_int {
 }
 // a, b — УКАЗАТЕЛИ на данные, не сами данные. Каст адреса в i32 — ошибка.
 ```
+
+### 4.5 Repr, Alignment, Layout
+
+**Repr варианты:**
+- Без repr — Rust переупорядочивает поля для минимизации padding
+- `#[repr(C)]` — порядок как в C, padding по правилам C
+- `#[repr(C, packed)]` — без padding (осторожно: невыровненный доступ на ARM = crash)
+- `#[repr(transparent)]` — layout совпадает с inner type (для newtype + FFI)
+
+**Alignment:** `u32` должен лежать по адресу кратному 4. Компилятор вставляет padding.
+```
+#[repr(C)]
+struct Example { a: u8, b: u32, c: u8 }
+// [a] [pad pad pad] [b b b b] [c] [pad pad pad] = 12 байт
+
+#[repr(C)]
+struct Better { b: u32, a: u8, c: u8 }
+// [b b b b] [a] [c] [pad pad] = 8 байт
+```
+Порядок полей влияет на размер! Без repr(C) Rust сам оптимизирует.
+
+**Packed для бинарных протоколов:**
+```rust
+#[repr(C, packed)]
+struct Packet { packet_type: u8, length: u8, device_id: u16, value: f32, checksum: u8 }
+// Ровно 9 байт, без padding. Парсинг через read_unaligned.
+```
+
+**Enum layout:**
+- Discriminant = минимальный размер (3 варианта → u8, не u32)
+- Общий размер = discriminant + padding + самый большой вариант
+- **Niche optimization:** `Option<Box<T>>` = `Box<T>` по размеру (None = null)
+
+**offset_of! — смещения полей для MMIO:**
+```rust
+#[repr(C)]
+struct SensorRegisters { status: u8, _reserved: [u8; 3], temperature: u32 }
+mem::offset_of!(SensorRegisters, temperature) // → 4
+```

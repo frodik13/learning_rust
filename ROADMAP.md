@@ -23,7 +23,7 @@
 - [x] **4.2** Drop trait, деструкторы, порядок дропа
 - [x] **4.3** Unsafe: raw pointers, transmute, unsafe trait impl
 - [x] **4.4** FFI: вызов C из Rust и наоборот (критично для RPi — обёртки над sysfs, ioctl)
-- [ ] **4.5** Repr, alignment, layout — контроль памяти как в C
+- [x] **4.5** Repr, alignment, layout — контроль памяти как в C
 
 ## Фаза 5: Concurrency без GC
 - [ ] **5.1** Send/Sync — почему Rust гарантирует thread safety на уровне типов
